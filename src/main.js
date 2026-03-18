@@ -58,8 +58,8 @@ const appState = {
     timerId: null,
     intervalMs: 320,
     confirmFrames: 3,
-    detectEveryCycles: 3,
-    tickIndex: 0,
+    detectIntervalMs: 960,
+    lastDetectAt: 0,
     lastPrimaryFace: null,
     pendingPersonId: null,
     pendingCount: 0,
@@ -271,12 +271,16 @@ async function startAutoIdentification() {
     10,
     3
   );
+  appState.auto.detectIntervalMs = Math.max(
+    900,
+    Math.round(appState.auto.intervalMs * 3)
+  );
   resetAutoTracking();
   resetAutoConfirmation();
   appState.auto.running = true;
   setAutoButtons();
   setAutoResult(
-    `Auto identification started (interval ${appState.auto.intervalMs}ms, confirm ${appState.auto.confirmFrames} frames).`
+    `Auto identification started (check ${appState.auto.intervalMs}ms, detect ${appState.auto.detectIntervalMs}ms, confirm ${appState.auto.confirmFrames} frames).`
   );
   setStatus("Auto identification is running.");
   void autoIdentifyTick();
@@ -301,6 +305,7 @@ async function autoIdentifyTick() {
     return;
   }
 
+  let runDetectionThisTick = false;
   const startedAt = performance.now();
   try {
     if (!appState.stream || !elements.video.videoWidth) {
@@ -319,16 +324,18 @@ async function autoIdentifyTick() {
     );
     const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
     const minGap = appState.peopleCache.length > 1 ? 0.03 : 0;
-    const runDetection =
-      appState.auto.tickIndex % appState.auto.detectEveryCycles === 0 ||
-      !appState.auto.lastPrimaryFace;
+    runDetectionThisTick =
+      !appState.auto.lastPrimaryFace ||
+      startedAt - appState.auto.lastDetectAt >= appState.auto.detectIntervalMs;
     const { embedding, primaryFace } = await detectAndEmbed({
       overlayOnly: true,
-      runDetection,
+      runDetection: runDetectionThisTick,
       reuseFaceBox: appState.auto.lastPrimaryFace
     });
+    if (runDetectionThisTick) {
+      appState.auto.lastDetectAt = startedAt;
+    }
     appState.auto.lastPrimaryFace = primaryFace ? cloneFaceBox(primaryFace) : null;
-    appState.auto.tickIndex += 1;
     const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
 
     if (best.matched) {
@@ -383,7 +390,7 @@ async function autoIdentifyTick() {
 
   const latency = performance.now() - startedAt;
   appState.auto.lastLatencyMs = latency;
-  updateAutoMetrics(latency);
+  updateAutoMetrics(latency, runDetectionThisTick);
 
   if (!appState.auto.running) {
     return;
@@ -582,7 +589,7 @@ function setAutoButtons() {
   elements.stopAutoBtn.disabled = !appState.auto.running;
 }
 
-function updateAutoMetrics(latencyMs) {
+function updateAutoMetrics(latencyMs, ranDetection = false) {
   if (latencyMs == null) {
     elements.autoMetrics.textContent = "Latency: - ms | Inference FPS: - | Checks/s: -";
     return;
@@ -591,7 +598,7 @@ function updateAutoMetrics(latencyMs) {
   const inferenceFps = latencyMs > 0 ? (1000 / latencyMs).toFixed(2) : "-";
   const checksPerSecond = (1000 / (latencyMs + appState.auto.intervalMs)).toFixed(2);
   elements.autoMetrics.textContent =
-    `Latency: ${latencyMs.toFixed(0)} ms | Inference FPS: ${inferenceFps} | Checks/s: ${checksPerSecond}`;
+    `Latency: ${latencyMs.toFixed(0)} ms | Inference FPS: ${inferenceFps} | Checks/s: ${checksPerSecond} | Detect: ${ranDetection ? "yes" : "reuse box"}`;
 }
 
 function resetAutoConfirmation() {
@@ -600,7 +607,7 @@ function resetAutoConfirmation() {
 }
 
 function resetAutoTracking() {
-  appState.auto.tickIndex = 0;
+  appState.auto.lastDetectAt = 0;
   appState.auto.lastPrimaryFace = null;
 }
 
