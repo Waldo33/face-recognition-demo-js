@@ -35,22 +35,20 @@ const elements = {
   video: document.getElementById("camera"),
   frameCanvas: document.getElementById("frameCanvas"),
   status: document.getElementById("status"),
-  startCameraBtn: document.getElementById("startCameraBtn"),
-  stopCameraBtn: document.getElementById("stopCameraBtn"),
+  toggleRecognitionBtn: document.getElementById("toggleRecognitionBtn"),
+  addPersonBtn: document.getElementById("addPersonBtn"),
+  openMoreBtn: document.getElementById("openMoreBtn"),
+  capturePanel: document.getElementById("capturePanel"),
+  closeCapturePanelBtn: document.getElementById("closeCapturePanelBtn"),
+  actionsModal: document.getElementById("actionsModal"),
+  settingsModal: document.getElementById("settingsModal"),
+  enrollModal: document.getElementById("enrollModal"),
   openSettingsBtn: document.getElementById("openSettingsBtn"),
-  openEnrollBtn: document.getElementById("openEnrollBtn"),
   openCacheBtn: document.getElementById("openCacheBtn"),
-  workflowModal: document.getElementById("workflowModal"),
   cacheModal: document.getElementById("cacheModal"),
-  autoCaseTab: document.getElementById("autoCaseTab"),
-  enrollCaseTab: document.getElementById("enrollCaseTab"),
-  autoCase: document.getElementById("autoCase"),
-  enrollCase: document.getElementById("enrollCase"),
   autoThresholdInput: document.getElementById("autoThresholdInput"),
   autoIntervalInput: document.getElementById("autoIntervalInput"),
   autoConfirmInput: document.getElementById("autoConfirmInput"),
-  startAutoBtn: document.getElementById("startAutoBtn"),
-  stopAutoBtn: document.getElementById("stopAutoBtn"),
   autoMetrics: document.getElementById("autoMetrics"),
   autoResult: document.getElementById("autoResult"),
   captureEnrollBtn: document.getElementById("captureEnrollBtn"),
@@ -101,9 +99,9 @@ async function init() {
   void warmupOfflineAssets();
   await refreshPeopleCache();
   await renderPeopleList();
-  switchCase("auto");
   setAutoButtons();
-  setStatus("Запустите камеру и выберите режим ниже.");
+  hideCapturePanel();
+  setStatus("Нажмите «Запустить распознавание» или «Добавить человека».");
   setAutoResult("Автораспознавание не запущено.");
   setEnrollResult("Добавление ещё не запускалось.");
   updateAutoMetrics(null);
@@ -138,30 +136,25 @@ async function urlExists(url) {
 }
 
 function bindEvents() {
-  elements.startCameraBtn.addEventListener("click", () => runSafe(startCamera));
-  elements.stopCameraBtn.addEventListener("click", stopCamera);
+  elements.toggleRecognitionBtn.addEventListener("click", () => runSafe(toggleRecognition));
+  elements.addPersonBtn.addEventListener("click", () => runSafe(beginEnrollmentCapture));
+  elements.openMoreBtn.addEventListener("click", () => openModal(elements.actionsModal));
+  elements.closeCapturePanelBtn.addEventListener("click", hideCapturePanel);
   elements.openSettingsBtn.addEventListener("click", () => {
-    switchCase("auto");
-    openModal(elements.workflowModal);
-  });
-  elements.openEnrollBtn.addEventListener("click", () => {
-    switchCase("enroll");
-    openModal(elements.workflowModal);
+    closeModal(elements.actionsModal);
+    openModal(elements.settingsModal);
   });
   elements.openCacheBtn.addEventListener("click", () =>
     runSafe(async () => {
+      closeModal(elements.actionsModal);
       await refreshPeopleCache();
       await renderPeopleList();
       openModal(elements.cacheModal);
     })
   );
-  elements.autoCaseTab.addEventListener("click", () => switchCase("auto"));
-  elements.enrollCaseTab.addEventListener("click", () => switchCase("enroll"));
-  elements.startAutoBtn.addEventListener("click", () => runSafe(startAutoIdentification));
-  elements.stopAutoBtn.addEventListener("click", () => stopAutoIdentification("Автораспознавание остановлено."));
   elements.captureEnrollBtn.addEventListener("click", () => runSafe(captureForEnrollment));
   elements.enrollImageInput.addEventListener("change", (event) =>
-    runSafe(() => loadEnrollmentImage(event))
+    runSafe(() => loadEnrollmentImage(event, { openEnrollModal: true }))
   );
   elements.enrollBtn.addEventListener("click", () => runSafe(enrollFace));
   elements.clearCacheBtn.addEventListener("click", () => runSafe(clearCache));
@@ -187,26 +180,47 @@ async function runSafe(task) {
 }
 
 function toggleBusyControls(disabled) {
-  elements.startCameraBtn.disabled = disabled;
+  elements.toggleRecognitionBtn.disabled = disabled;
+  elements.addPersonBtn.disabled = disabled || appState.auto.running;
+  elements.openMoreBtn.disabled = disabled;
+  elements.closeCapturePanelBtn.disabled = disabled;
   elements.openSettingsBtn.disabled = disabled;
-  elements.openEnrollBtn.disabled = disabled;
   elements.openCacheBtn.disabled = disabled;
   elements.captureEnrollBtn.disabled = disabled;
   elements.enrollBtn.disabled = disabled;
   elements.clearCacheBtn.disabled = disabled;
   elements.enrollImageInput.disabled = disabled;
-  elements.startAutoBtn.disabled = disabled || appState.auto.running;
 }
 
-function switchCase(caseName) {
-  const autoActive = caseName === "auto";
-  if (!autoActive && appState.auto.running) {
+async function toggleRecognition() {
+  if (appState.auto.running) {
+    stopAutoIdentification("Автораспознавание остановлено.");
+    return;
+  }
+
+  if (!appState.stream || !elements.video.videoWidth) {
+    await startCamera();
+  }
+  await startAutoIdentification();
+}
+
+async function beginEnrollmentCapture() {
+  if (appState.auto.running) {
     stopAutoIdentification("Автораспознавание приостановлено для добавления.");
   }
-  elements.autoCase.classList.toggle("hidden", !autoActive);
-  elements.enrollCase.classList.toggle("hidden", autoActive);
-  elements.autoCaseTab.classList.toggle("active", autoActive);
-  elements.enrollCaseTab.classList.toggle("active", !autoActive);
+  if (!appState.stream || !elements.video.videoWidth) {
+    await startCamera();
+  }
+  showCapturePanel();
+  setStatus("Наведите лицо в кадр и нажмите «Снять текущий кадр».");
+}
+
+function showCapturePanel() {
+  elements.capturePanel.classList.remove("hidden");
+}
+
+function hideCapturePanel() {
+  elements.capturePanel.classList.add("hidden");
 }
 
 async function startCamera() {
@@ -252,9 +266,12 @@ async function captureForEnrollment() {
   renderFrame([], null, { drawSource: true });
   setEnrollResult("Кадр для добавления сохранен.");
   setStatus("Текущий кадр с камеры захвачен.");
+  hideCapturePanel();
+  openModal(elements.enrollModal);
 }
 
-async function loadEnrollmentImage(event) {
+async function loadEnrollmentImage(event, options = {}) {
+  const openEnrollModal = options.openEnrollModal ?? false;
   const file = event.target.files?.[0];
   if (!file) {
     return;
@@ -267,6 +284,10 @@ async function loadEnrollmentImage(event) {
     renderFrame([], null, { drawSource: true });
     setEnrollResult(`Фото загружено: ${file.name}`);
     setStatus(`Источник для добавления обновлен: ${file.name}.`);
+    if (openEnrollModal) {
+      hideCapturePanel();
+      openModal(elements.enrollModal);
+    }
   } finally {
     URL.revokeObjectURL(imageUrl);
     elements.enrollImageInput.value = "";
@@ -316,6 +337,7 @@ async function enrollFace() {
   setStatus(
     `Сэмпл №${person.sampleCount} для "${personId}" сохранен в IndexedDB.`
   );
+  closeModal(elements.enrollModal);
 }
 
 async function startAutoIdentification() {
@@ -357,6 +379,8 @@ async function startAutoIdentification() {
     900,
     Math.round(appState.auto.intervalMs * 3)
   );
+  hideCapturePanel();
+  closeModal(elements.enrollModal);
   resetAutoTracking();
   resetAutoConfirmation();
   appState.auto.running = true;
@@ -856,6 +880,7 @@ async function clearCache() {
   setAutoResult("Автораспознавание не запущено.");
   setEnrollResult("Добавление ещё не запускалось.");
   setStatus("Кэш очищен.");
+  closeModal(elements.actionsModal);
 }
 
 function setStatus(text) {
@@ -879,8 +904,15 @@ function setMessage(element, text, kind = "") {
 }
 
 function setAutoButtons() {
-  elements.startAutoBtn.disabled = appState.auto.running || appState.busy;
-  elements.stopAutoBtn.disabled = !appState.auto.running;
+  const running = appState.auto.running;
+  elements.toggleRecognitionBtn.textContent = running
+    ? "Остановить распознавание"
+    : "Запустить распознавание";
+  elements.toggleRecognitionBtn.classList.toggle("danger", running);
+  elements.addPersonBtn.classList.toggle("hidden", running);
+  if (running) {
+    hideCapturePanel();
+  }
 }
 
 function bindModalEvents() {
@@ -897,7 +929,9 @@ function bindModalEvents() {
     if (event.key !== "Escape") {
       return;
     }
-    closeModal(elements.workflowModal);
+    closeModal(elements.actionsModal);
+    closeModal(elements.settingsModal);
+    closeModal(elements.enrollModal);
     closeModal(elements.cacheModal);
   });
 }
@@ -917,14 +951,25 @@ function closeModal(modal) {
   }
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
-  if (elements.workflowModal.classList.contains("hidden") && elements.cacheModal.classList.contains("hidden")) {
+  const anyOpen = Array.from(document.querySelectorAll(".modal")).some(
+    (item) => !item.classList.contains("hidden")
+  );
+  if (!anyOpen) {
     document.body.classList.remove("modal-open");
   }
 }
 
 function closeModalById(modalId) {
-  if (modalId === "workflowModal") {
-    closeModal(elements.workflowModal);
+  if (modalId === "actionsModal") {
+    closeModal(elements.actionsModal);
+    return;
+  }
+  if (modalId === "settingsModal") {
+    closeModal(elements.settingsModal);
+    return;
+  }
+  if (modalId === "enrollModal") {
+    closeModal(elements.enrollModal);
     return;
   }
   if (modalId === "cacheModal") {

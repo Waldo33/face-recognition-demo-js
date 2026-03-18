@@ -232,7 +232,7 @@ h2 {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(240px, 1.35fr) repeat(2, minmax(0, 1fr));
 }
 
 .quick-actions {
@@ -277,10 +277,9 @@ button:disabled {
 button.secondary,
 .modal-close,
 #openSettingsBtn,
-#openEnrollBtn,
 #openCacheBtn,
-#stopCameraBtn,
-#stopAutoBtn {
+#openMoreBtn,
+#addPersonBtn {
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.04);
   color: #c8d2ec;
@@ -290,12 +289,33 @@ button.secondary,
 button.secondary:hover,
 .modal-close:hover,
 #openSettingsBtn:hover,
-#openEnrollBtn:hover,
 #openCacheBtn:hover,
-#stopCameraBtn:hover,
-#stopAutoBtn:hover {
+#openMoreBtn:hover,
+#addPersonBtn:hover {
   box-shadow: none;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.capture-panel {
+  border: 1px dashed rgba(84, 104, 255, 0.45);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(30, 39, 88, 0.18);
+}
+
+.capture-title {
+  margin: 0 0 8px;
+  color: #9eb0df;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.capture-actions {
+  margin-top: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 button.danger {
@@ -464,6 +484,10 @@ body.modal-open {
   width: min(840px, 100%);
 }
 
+#actionsModal .modal-card {
+  width: min(460px, 100%);
+}
+
 .modal-head {
   display: flex;
   align-items: center;
@@ -480,6 +504,15 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.action-list button {
+  width: 100%;
 }
 
 .people-list {
@@ -562,12 +595,6 @@ body.modal-open {
   }
 }
 
-@media (max-width: 1024px) {
-  .quick-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 860px) {
   body {
     overflow: auto;
@@ -594,6 +621,10 @@ body.modal-open {
   }
 
   .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .capture-actions {
     grid-template-columns: 1fr;
   }
 
