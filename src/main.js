@@ -305,7 +305,7 @@ async function autoIdentifyTick() {
       throw new Error("Cache is empty. Add at least one person.");
     }
 
-    setSourceFrom(elements.video, { maxSide: 640 });
+    setSourceFrom(elements.video, { maxSide: 480 });
     const baseThreshold = toNumberInRange(
       elements.autoThresholdInput.value,
       0.1,
