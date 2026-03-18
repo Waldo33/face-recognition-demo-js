@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Демо распознавания лиц</title>
+    <script type="module" crossorigin src="/assets/index-Zq6RoXTg.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DqRt9N3N.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="card viewer-card">
+        <h1>Демо распознавания лиц</h1>
+        <p class="muted">
+          ONNXRuntime Web + детектор UltraFace + эмбеддинги InsightFace
+        </p>
+        <div class="links-bar">
+          <a href="https://t.me/waldente" target="_blank" rel="noreferrer noopener">
+            Telegram: @waldente
+          </a>
+          <a
+            href="https://github.com/Waldo33/face-recognition-demo-js"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            GitHub проекта
+          </a>
+        </div>
+
+        <div class="viewer">
+          <video id="camera" autoplay muted playsinline></video>
+          <canvas id="frameCanvas"></canvas>
+        </div>
+
+        <div class="row controls">
+          <button id="startCameraBtn">Запустить камеру</button>
+          <button id="stopCameraBtn" class="secondary">Остановить камеру</button>
+          <button id="startAutoBtn">Запустить автораспознавание</button>
+          <button id="stopAutoBtn" class="secondary">Остановить автораспознавание</button>
+        </div>
+
+        <div class="row quick-actions">
+          <button id="openSettingsBtn" class="secondary">Настройки распознавания</button>
+          <button id="openEnrollBtn" class="secondary">Добавить человека</button>
+          <button id="openCacheBtn" class="secondary">Локальный кэш</button>
+        </div>
+
+        <p id="status" class="status">Запустите камеру и выберите режим ниже.</p>
+        <p id="autoResult" class="result live-result">Автораспознавание не запущено.</p>
+        <p id="autoMetrics" class="status">Задержка: - мс | FPS инференса: - | Проверок/с: -</p>
+      </section>
+    </main>
+
+    <div id="workflowModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="workflowModal"></div>
+      <section class="card modal-card workflow-card">
+        <div class="modal-head">
+          <h2>Управление распознаванием</h2>
+          <button type="button" class="secondary modal-close" data-close-modal="workflowModal">
+            Закрыть
+          </button>
+        </div>
+        <div class="tab-row">
+          <button id="autoCaseTab" class="tab active" type="button">
+            Настройки распознавания
+          </button>
+          <button id="enrollCaseTab" class="tab" type="button">
+            Добавить человека
+          </button>
+        </div>
+
+        <section id="autoCase" class="case active">
+          <h2>Параметры автораспознавания</h2>
+          <p class="muted">
+            Периодическая проверка с камеры без анализа каждого кадра.
+          </p>
+          <div class="form-grid auto-grid">
+            <label>
+              Порог совпадения (cosine)
+              <input
+                id="autoThresholdInput"
+                type="number"
+                min="0.1"
+                max="0.99"
+                step="0.01"
+                value="0.55"
+              />
+            </label>
+            <label>
+              Интервал проверки (мс)
+              <input
+                id="autoIntervalInput"
+                type="number"
+                min="60"
+                max="2000"
+                step="10"
+                value="320"
+              />
+            </label>
+            <label>
+              Подтверждение по кадрам
+              <input
+                id="autoConfirmInput"
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                value="3"
+              />
+            </label>
+          </div>
+          <p class="muted">Запуск и остановка автораспознавания доступны на главном экране.</p>
+        </section>
+
+        <section id="enrollCase" class="case hidden">
+          <h2>Добавить нового человека</h2>
+          <p class="muted">
+            Сделайте снимок с камеры или загрузите фото и сохраните эмбеддинг лица.
+          </p>
+          <p class="muted">
+            Повторное сохранение с тем же ID добавляет новый сэмпл лица для повышения точности.
+          </p>
+
+          <div class="row">
+            <button id="captureEnrollBtn">Снять текущий кадр</button>
+            <label class="file-input">
+              Загрузить фото
+              <input id="enrollImageInput" type="file" accept="image/*" />
+            </label>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              ID человека
+              <input id="personIdInput" type="text" placeholder="например, emp-1001" />
+            </label>
+            <label>
+              Имя
+              <input id="firstNameInput" type="text" placeholder="Иван" />
+            </label>
+            <label>
+              Фамилия
+              <input id="lastNameInput" type="text" placeholder="Иванов" />
+            </label>
+          </div>
+
+          <div class="row">
+            <button id="enrollBtn">Найти лицо и сохранить сэмпл</button>
+          </div>
+          <p id="enrollResult" class="result">Добавление ещё не запускалось.</p>
+        </section>
+      </section>
+    </div>
+
+    <div id="cacheModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="cacheModal"></div>
+      <section class="card modal-card cache-card">
+        <div class="modal-head">
+          <h2>Локальный кэш эмбеддингов</h2>
+          <button type="button" class="secondary modal-close" data-close-modal="cacheModal">
+            Закрыть
+          </button>
+        </div>
+        <div class="row between">
+          <button id="clearCacheBtn" class="danger">Очистить кэш</button>
+        </div>
+        <p class="muted">
+          Все данные хранятся только в IndexedDB браузера на этом устройстве.
+        </p>
+        <div id="peopleList" class="people-list"></div>
+      </section>
+    </div>
+
+  </body>
+</html>
