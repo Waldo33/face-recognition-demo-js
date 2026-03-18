@@ -36,7 +36,7 @@ export async function detectFaces(session, source, options = {}) {
   const scoresTensor = tensors.find((item) => item.dims[item.dims.length - 1] === 2);
 
   if (!boxesTensor || !scoresTensor) {
-    throw new Error("UltraFace outputs are not recognized.");
+    throw new Error("Не удалось распознать выходы модели UltraFace.");
   }
 
   const sourceSize = getSourceSize(source);
@@ -209,5 +209,5 @@ function createCanvas() {
   if (typeof document !== "undefined") {
     return document.createElement("canvas");
   }
-  throw new Error("No canvas implementation available.");
+  throw new Error("В окружении недоступна реализация canvas.");
 }

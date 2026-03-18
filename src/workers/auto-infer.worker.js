@@ -28,7 +28,7 @@ self.onmessage = async (event) => {
     } else if (type === "processFrame") {
       result = await handleProcessFrame(payload);
     } else {
-      throw new Error(`Unsupported worker message type: ${type}`);
+      throw new Error(`Неподдерживаемый тип сообщения воркера: ${type}`);
     }
 
     self.postMessage({ requestId, ok: true, payload: result });
@@ -36,7 +36,7 @@ self.onmessage = async (event) => {
     self.postMessage({
       requestId,
       ok: false,
-      error: error?.message || "Worker processing failed."
+      error: error?.message || "Ошибка обработки в воркере."
     });
   }
 };
@@ -80,13 +80,13 @@ function handleResetTracking() {
 
 async function handleProcessFrame(payload) {
   if (!state.detectorSession || !state.recognizerSession) {
-    throw new Error("Worker sessions are not initialized.");
+    throw new Error("Сессии воркера не инициализированы.");
   }
 
   const startedAt = performance.now();
   const imageBitmap = payload?.imageBitmap;
   if (!imageBitmap) {
-    throw new Error("Missing imageBitmap in processFrame payload.");
+    throw new Error("В payload processFrame отсутствует imageBitmap.");
   }
 
   const maxSide = payload?.maxSide ?? 480;
@@ -216,7 +216,7 @@ function createCanvas(width, height) {
   if (typeof OffscreenCanvas !== "undefined") {
     return new OffscreenCanvas(width, height);
   }
-  throw new Error("OffscreenCanvas is not available in worker.");
+  throw new Error("OffscreenCanvas недоступен в воркере.");
 }
 
 function cloneFace(face) {

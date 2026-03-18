@@ -22,7 +22,7 @@ export async function extractEmbedding(session, source, faceBox, options = {}) {
   const outputMap = await session.run({ [session.inputNames[0]]: tensor });
   const outputTensor = pickEmbeddingTensor(outputMap);
   if (!outputTensor) {
-    throw new Error("Recognizer output tensor is empty.");
+    throw new Error("Выходной тензор распознавателя пуст.");
   }
 
   const embedding = l2Normalize(outputTensor.data);
@@ -104,7 +104,7 @@ function createCanvas() {
   if (typeof document !== "undefined") {
     return document.createElement("canvas");
   }
-  throw new Error("No canvas implementation available.");
+  throw new Error("В окружении недоступна реализация canvas.");
 }
 
 function pickEmbeddingTensor(outputMap) {
@@ -133,7 +133,7 @@ function pickEmbeddingTensor(outputMap) {
 
 function validateEmbedding(embedding) {
   if (!embedding || embedding.length < 64) {
-    throw new Error("Recognizer returned invalid embedding length.");
+    throw new Error("Распознаватель вернул некорректную длину эмбеддинга.");
   }
 
   // Detect degenerate outputs where all values are almost equal.
@@ -146,6 +146,6 @@ function validateEmbedding(embedding) {
   variance /= embedding.length;
 
   if (variance < 1e-6) {
-    throw new Error("Recognizer produced degenerate embedding.");
+    throw new Error("Распознаватель вернул вырожденный эмбеддинг.");
   }
 }

@@ -7,7 +7,7 @@ let dbPromise = null;
 
 function getDb() {
   if (!("indexedDB" in window)) {
-    throw new Error("IndexedDB is not supported in this browser.");
+    throw new Error("IndexedDB не поддерживается в этом браузере.");
   }
 
   if (dbPromise) {
@@ -136,13 +136,13 @@ export async function upsertPerson({
   appendSample = true
 }) {
   if (!personId || !personId.trim()) {
-    throw new Error("Person ID is required.");
+    throw new Error("Нужно указать ID человека.");
   }
 
   const normalizedId = personId.trim();
   const safeEmbedding = toFloat32Embedding(embedding);
   if (!safeEmbedding.length) {
-    throw new Error("Embedding is empty.");
+    throw new Error("Эмбеддинг пустой.");
   }
 
   const db = await getDb();

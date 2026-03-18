@@ -81,9 +81,9 @@ async function init() {
   await renderPeopleList();
   switchCase("auto");
   setAutoButtons();
-  setStatus("Start camera and pick a workflow below.");
-  setAutoResult("Auto identification is idle.");
-  setEnrollResult("No enrollment run yet.");
+  setStatus("Запустите камеру и выберите режим ниже.");
+  setAutoResult("Автораспознавание не запущено.");
+  setEnrollResult("Добавление ещё не запускалось.");
   updateAutoMetrics(null);
 }
 
@@ -93,7 +93,7 @@ function bindEvents() {
   elements.autoCaseTab.addEventListener("click", () => switchCase("auto"));
   elements.enrollCaseTab.addEventListener("click", () => switchCase("enroll"));
   elements.startAutoBtn.addEventListener("click", () => runSafe(startAutoIdentification));
-  elements.stopAutoBtn.addEventListener("click", () => stopAutoIdentification("Auto identification stopped."));
+  elements.stopAutoBtn.addEventListener("click", () => stopAutoIdentification("Автораспознавание остановлено."));
   elements.captureEnrollBtn.addEventListener("click", () => runSafe(captureForEnrollment));
   elements.enrollImageInput.addEventListener("change", (event) =>
     runSafe(() => loadEnrollmentImage(event))
@@ -111,7 +111,7 @@ async function runSafe(task) {
   try {
     await task();
   } catch (error) {
-    const message = error?.message || "Operation failed.";
+    const message = error?.message || "Операция не выполнена.";
     setStatus(message);
   } finally {
     appState.busy = false;
@@ -132,7 +132,7 @@ function toggleBusyControls(disabled) {
 function switchCase(caseName) {
   const autoActive = caseName === "auto";
   if (!autoActive && appState.auto.running) {
-    stopAutoIdentification("Auto identification paused for enrollment.");
+    stopAutoIdentification("Автораспознавание приостановлено для добавления.");
   }
   elements.autoCase.classList.toggle("hidden", !autoActive);
   elements.enrollCase.classList.toggle("hidden", autoActive);
@@ -142,11 +142,11 @@ function switchCase(caseName) {
 
 async function startCamera() {
   if (appState.stream) {
-    setStatus("Camera is already active.");
+    setStatus("Камера уже активна.");
     return;
   }
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Camera API is not available in this browser.");
+    throw new Error("API камеры недоступен в этом браузере.");
   }
 
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -156,14 +156,14 @@ async function startCamera() {
   appState.stream = stream;
   elements.video.srcObject = stream;
   await elements.video.play();
-  setStatus("Camera started.");
+  setStatus("Камера запущена.");
 }
 
 function stopCamera() {
   stopAutoIdentification("");
 
   if (!appState.stream) {
-    setStatus("Camera already stopped.");
+    setStatus("Камера уже остановлена.");
     return;
   }
 
@@ -172,17 +172,17 @@ function stopCamera() {
   }
   appState.stream = null;
   elements.video.srcObject = null;
-  setStatus("Camera stopped.");
+  setStatus("Камера остановлена.");
 }
 
 async function captureForEnrollment() {
   if (!appState.stream || !elements.video.videoWidth) {
-    throw new Error("Start camera first.");
+    throw new Error("Сначала запустите камеру.");
   }
   setSourceFrom(elements.video);
   renderFrame([], null, { drawSource: true });
-  setEnrollResult("Frame captured for enrollment.");
-  setStatus("Captured current camera frame.");
+  setEnrollResult("Кадр для добавления сохранен.");
+  setStatus("Текущий кадр с камеры захвачен.");
 }
 
 async function loadEnrollmentImage(event) {
@@ -196,8 +196,8 @@ async function loadEnrollmentImage(event) {
     const image = await loadImageElement(imageUrl);
     setSourceFrom(image);
     renderFrame([], null, { drawSource: true });
-    setEnrollResult(`Image loaded: ${file.name}`);
-    setStatus(`Enrollment source updated from ${file.name}.`);
+    setEnrollResult(`Фото загружено: ${file.name}`);
+    setStatus(`Источник для добавления обновлен: ${file.name}.`);
   } finally {
     URL.revokeObjectURL(imageUrl);
     elements.enrollImageInput.value = "";
@@ -206,7 +206,7 @@ async function loadEnrollmentImage(event) {
 
 async function enrollFace() {
   if (appState.auto.running) {
-    stopAutoIdentification("Auto identification paused for enrollment.");
+    stopAutoIdentification("Автораспознавание приостановлено для добавления.");
   }
 
   const personId = elements.personIdInput.value.trim();
@@ -214,7 +214,7 @@ async function enrollFace() {
   const lastName = elements.lastNameInput.value.trim();
 
   if (!personId) {
-    throw new Error("Person ID is required.");
+    throw new Error("Нужно указать ID человека.");
   }
 
   if (!hasSourceFrame()) {
@@ -222,13 +222,13 @@ async function enrollFace() {
       setSourceFrom(elements.video);
       renderFrame([], null, { drawSource: true });
     } else {
-      throw new Error("Capture a frame or upload an image first.");
+      throw new Error("Сначала снимите кадр или загрузите фото.");
     }
   }
 
   await ensureModels();
-  setStatus("Detecting face and creating embedding...");
-  setEnrollResult("Processing enrollment...");
+  setStatus("Определяем лицо и создаем эмбеддинг...");
+  setEnrollResult("Обрабатываем добавление...");
 
   const { embedding } = await detectAndEmbed();
   const person = await upsertPerson({
@@ -241,33 +241,33 @@ async function enrollFace() {
   await refreshPeopleCache();
   await renderPeopleList();
   setEnrollResult(
-    `Saved sample ${person.sampleCount} for "${personId}".`,
+    `Сохранён сэмпл №${person.sampleCount} для "${personId}".`,
     "ok"
   );
   setStatus(
-    `Saved sample ${person.sampleCount} for "${personId}" in IndexedDB.`
+    `Сэмпл №${person.sampleCount} для "${personId}" сохранен в IndexedDB.`
   );
 }
 
 async function startAutoIdentification() {
   if (appState.auto.running) {
-    setStatus("Auto identification is already running.");
+    setStatus("Автораспознавание уже запущено.");
     return;
   }
 
   if (!appState.stream || !elements.video.videoWidth) {
-    throw new Error("Start camera first.");
+    throw new Error("Сначала запустите камеру.");
   }
 
   await refreshPeopleCache();
   if (!appState.peopleCache.length) {
-    throw new Error("Cache is empty. Add at least one person first.");
+    throw new Error("Кэш пуст. Сначала добавьте хотя бы одного человека.");
   }
 
   appState.auto.useWorker = await ensureAutoWorker();
   if (!appState.auto.useWorker) {
     await ensureModels();
-    setStatus("Auto worker is unavailable, running inference on main thread.");
+    setStatus("Воркер недоступен, инференс выполняется в основном потоке.");
   } else {
     await workerCall("resetTracking", {});
   }
@@ -293,17 +293,17 @@ async function startAutoIdentification() {
   appState.auto.running = true;
   setAutoButtons();
   setAutoResult(
-    `Auto identification started (check ${appState.auto.intervalMs}ms, detect ${appState.auto.detectIntervalMs}ms, confirm ${appState.auto.confirmFrames} frames).`
+    `Автораспознавание запущено (проверка ${appState.auto.intervalMs} мс, детекция ${appState.auto.detectIntervalMs} мс, подтверждение ${appState.auto.confirmFrames} кадра/кадров).`
   );
   setStatus(
     appState.auto.useWorker
-      ? "Auto identification is running in worker."
-      : "Auto identification is running."
+      ? "Автораспознавание выполняется в воркере."
+      : "Автораспознавание запущено."
   );
   void autoIdentifyTick();
 }
 
-function stopAutoIdentification(statusText = "Auto identification stopped.") {
+function stopAutoIdentification(statusText = "Автораспознавание остановлено.") {
   if (appState.auto.timerId) {
     window.clearTimeout(appState.auto.timerId);
     appState.auto.timerId = null;
@@ -330,10 +330,10 @@ async function autoIdentifyTick() {
   const startedAt = performance.now();
   try {
     if (!appState.stream || !elements.video.videoWidth) {
-      throw new Error("Camera is not available.");
+      throw new Error("Камера недоступна.");
     }
     if (!appState.peopleCache.length) {
-      throw new Error("Cache is empty. Add at least one person.");
+      throw new Error("Кэш пуст. Добавьте хотя бы одного человека.");
     }
 
     const baseThreshold = toNumberInRange(
@@ -362,7 +362,7 @@ async function autoIdentifyTick() {
 
       if (frameResult.noFace || !frameResult.best) {
         resetAutoConfirmation();
-        setAutoResult("No face detected in current frame.", "warn");
+        setAutoResult("На текущем кадре лицо не найдено.", "warn");
       } else {
         handleAutoBestMatch(
           frameResult.best,
@@ -391,7 +391,7 @@ async function autoIdentifyTick() {
   } catch (error) {
     resetAutoTracking();
     resetAutoConfirmation();
-    const message = error?.message || "Auto identification failed.";
+    const message = error?.message || "Ошибка автораспознавания.";
     let switchedFromWorker = false;
 
     if (appState.auto.useWorker) {
@@ -399,20 +399,20 @@ async function autoIdentifyTick() {
       appState.auto.useWorker = false;
       appState.worker.ready = false;
       await ensureModels();
-      setStatus("Worker failed, switched to main-thread inference.");
-      setAutoResult("Worker failed once, fallback to main-thread inference.", "warn");
+      setStatus("Воркер завершился с ошибкой, переключено на основной поток.");
+      setAutoResult("Воркер недоступен, используем инференс в основном потоке.", "warn");
     }
 
     if (!switchedFromWorker) {
-      setAutoResult(`Auto identification failed: ${message}`, "warn");
+      setAutoResult(`Ошибка автораспознавания: ${message}`, "warn");
       setStatus(message);
     }
 
     if (
-      message.includes("Camera is not available") ||
-      message.includes("Cache is empty")
+      message.includes("Камера недоступна") ||
+      message.includes("Кэш пуст")
     ) {
-      stopAutoIdentification("Auto identification stopped.");
+      stopAutoIdentification("Автораспознавание остановлено.");
       return;
     }
   }
@@ -435,7 +435,7 @@ async function autoIdentifyTick() {
 function handleAutoBestMatch(best, threshold, minGap) {
   if (!best?.person) {
     resetAutoConfirmation();
-    setAutoResult("No match found.", "warn");
+    setAutoResult("Совпадений не найдено.", "warn");
     return;
   }
 
@@ -452,12 +452,12 @@ function handleAutoBestMatch(best, threshold, minGap) {
     const confirmProgress = `${appState.auto.pendingCount}/${appState.auto.confirmFrames}`;
     if (appState.auto.pendingCount >= appState.auto.confirmFrames) {
       setAutoResult(
-        `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | confirmed ${confirmProgress}`,
+        `Совпадение: ${title} (id: ${best.person.personId}, сэмпл ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | подтверждено ${confirmProgress}`,
         "ok"
       );
     } else {
       setAutoResult(
-        `Candidate: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | confirming ${confirmProgress}`,
+        `Кандидат: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | подтверждение ${confirmProgress}`,
         "warn"
       );
     }
@@ -466,9 +466,9 @@ function handleAutoBestMatch(best, threshold, minGap) {
 
   resetAutoConfirmation();
   const title = formatPerson(best.person);
-  const gapText = best.gap == null ? "n/a" : best.gap.toFixed(4);
+  const gapText = best.gap == null ? "н/д" : best.gap.toFixed(4);
   setAutoResult(
-    `No exact match (threshold=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Closest: ${title} (sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
+    `Точного совпадения нет (порог=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Ближайший: ${title} (сэмпл ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
     "warn"
   );
 }
@@ -496,7 +496,7 @@ async function detectAndEmbed(options = {}) {
   renderFrame(faces, primaryFace, { drawSource: !overlayOnly });
 
   if (!primaryFace) {
-    throw new Error("No face detected in current frame.");
+    throw new Error("На текущем кадре лицо не найдено.");
   }
 
   const embedding = await extractEmbedding(
@@ -513,7 +513,7 @@ async function ensureModels() {
   if (appState.detectorSession && appState.recognizerSession) {
     return;
   }
-  setStatus("Loading ONNX models...");
+  setStatus("Загружаем ONNX-модели...");
 
   const [detectorSession, recognizerSession] = await Promise.all([
     appState.detectorSession || createDetectorSession(MODEL_PATHS.detector),
@@ -522,7 +522,7 @@ async function ensureModels() {
 
   appState.detectorSession = detectorSession;
   appState.recognizerSession = recognizerSession;
-  setStatus("Models loaded.");
+  setStatus("Модели загружены.");
 }
 
 function setSourceFrom(mediaElement, options = {}) {
@@ -579,7 +579,7 @@ function drawFaceBoxes(ctx, faces, primaryFace) {
     ctx.font = "14px sans-serif";
     const scoreText = Number.isFinite(face.score) ? face.score.toFixed(2) : "--";
     ctx.fillText(
-      `${isPrimary ? "Primary" : "Face"} ${scoreText}`,
+      `${isPrimary ? "Основное" : "Лицо"} ${scoreText}`,
       face.x + 4,
       Math.max(16, face.y - 6)
     );
@@ -601,7 +601,7 @@ async function renderPeopleList() {
   const people = appState.peopleCache;
   if (!people.length) {
     elements.peopleList.innerHTML =
-      "<p class='muted'>No embeddings in cache. Add a person to begin.</p>";
+      "<p class='muted'>В кэше нет эмбеддингов. Добавьте человека, чтобы начать.</p>";
     return;
   }
 
@@ -617,21 +617,21 @@ async function renderPeopleList() {
 
     const subtitle = document.createElement("div");
     subtitle.className = "person-subtitle";
-    subtitle.textContent = `Samples: ${person.sampleCount} | Updated: ${new Date(person.updatedAt).toLocaleString()}`;
+    subtitle.textContent = `Сэмплы: ${person.sampleCount} | Обновлено: ${new Date(person.updatedAt).toLocaleString()}`;
     info.appendChild(title);
     info.appendChild(subtitle);
 
     const removeButton = document.createElement("button");
-    removeButton.textContent = "Delete";
+    removeButton.textContent = "Удалить";
     removeButton.addEventListener("click", () =>
       runSafe(async () => {
         await removePerson(person.personId);
         await refreshPeopleCache();
         await renderPeopleList();
         if (!appState.peopleCache.length) {
-          stopAutoIdentification("Auto identification stopped: cache became empty.");
+          stopAutoIdentification("Автораспознавание остановлено: кэш стал пустым.");
         }
-        setStatus(`Deleted ${person.personId} from cache.`);
+        setStatus(`${person.personId} удален из кэша.`);
       })
     );
 
@@ -645,10 +645,10 @@ async function clearCache() {
   await clearPeopleCache();
   await refreshPeopleCache();
   await renderPeopleList();
-  stopAutoIdentification("Auto identification stopped: cache cleared.");
-  setAutoResult("Auto identification is idle.");
-  setEnrollResult("No enrollment run yet.");
-  setStatus("Cache cleared.");
+  stopAutoIdentification("Автораспознавание остановлено: кэш очищен.");
+  setAutoResult("Автораспознавание не запущено.");
+  setEnrollResult("Добавление ещё не запускалось.");
+  setStatus("Кэш очищен.");
 }
 
 function setStatus(text) {
@@ -678,14 +678,14 @@ function setAutoButtons() {
 
 function updateAutoMetrics(latencyMs, ranDetection = false) {
   if (latencyMs == null) {
-    elements.autoMetrics.textContent = "Latency: - ms | Inference FPS: - | Checks/s: -";
+    elements.autoMetrics.textContent = "Задержка: - мс | FPS инференса: - | Проверок/с: -";
     return;
   }
 
   const inferenceFps = latencyMs > 0 ? (1000 / latencyMs).toFixed(2) : "-";
   const checksPerSecond = (1000 / (latencyMs + appState.auto.intervalMs)).toFixed(2);
   elements.autoMetrics.textContent =
-    `Latency: ${latencyMs.toFixed(0)} ms | Inference FPS: ${inferenceFps} | Checks/s: ${checksPerSecond} | Detect: ${ranDetection ? "yes" : "reuse box"}`;
+    `Задержка: ${latencyMs.toFixed(0)} мс | FPS инференса: ${inferenceFps} | Проверок/с: ${checksPerSecond} | Детекция: ${ranDetection ? "да" : "повтор рамки"}`;
 }
 
 function resetAutoConfirmation() {
@@ -732,7 +732,7 @@ function clamp(value, min, max) {
 
 function formatPerson(person) {
   const name = [person.firstName, person.lastName].filter(Boolean).join(" ").trim();
-  return name || "Unnamed Person";
+  return name || "Без имени";
 }
 
 function getMediaSize(media) {
@@ -757,7 +757,7 @@ function loadImageElement(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to load selected image."));
+    img.onerror = () => reject(new Error("Не удалось загрузить выбранное изображение."));
     img.src = url;
   });
 }
@@ -809,12 +809,12 @@ function createAutoWorkerInstance() {
     if (ok) {
       pending.resolve(payload);
     } else {
-      pending.reject(new Error(error || "Worker request failed."));
+      pending.reject(new Error(error || "Ошибка запроса к воркеру."));
     }
   };
 
   worker.onerror = (event) => {
-    const message = event?.message || "Worker error.";
+    const message = event?.message || "Ошибка воркера.";
     for (const [, pending] of appState.worker.pending) {
       pending.reject(new Error(message));
     }
@@ -827,7 +827,7 @@ function createAutoWorkerInstance() {
 
 function workerCall(type, payload = {}, transfer = []) {
   if (!appState.worker.instance) {
-    return Promise.reject(new Error("Worker is not initialized."));
+    return Promise.reject(new Error("Воркер не инициализирован."));
   }
 
   const requestId = appState.worker.nextRequestId++;
@@ -874,5 +874,5 @@ async function processAutoFrameInWorker({
 }
 
 init().catch((error) => {
-  setStatus(error.message || "Initialization failed.");
+  setStatus(error.message || "Ошибка инициализации.");
 });

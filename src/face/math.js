@@ -17,7 +17,7 @@ export function l2Normalize(vector) {
 
 export function dotProduct(a, b) {
   if (a.length !== b.length) {
-    throw new Error("Vector dimensions mismatch.");
+    throw new Error("Размерности векторов не совпадают.");
   }
 
   let sum = 0;

@@ -231,6 +231,13 @@ button.danger {
   color: #5f4d08;
 }
 
+.live-result {
+  margin-top: 8px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  border-width: 2px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -322,6 +329,12 @@ input[type="number"] {
 
   .viewer {
     max-height: none;
+  }
+
+  .live-result {
+    position: sticky;
+    top: 8px;
+    z-index: 30;
   }
 
   #frameCanvas {
