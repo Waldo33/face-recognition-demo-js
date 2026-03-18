@@ -426,7 +426,8 @@ async function autoIdentifyTick() {
         frameResult.frameWidth,
         frameResult.frameHeight,
         frameResult.faces || [],
-        frameResult.primaryFace
+        frameResult.primaryFace,
+        frameResult.best || null
       );
 
       if (frameResult.noFace || !frameResult.best) {
@@ -445,7 +446,7 @@ async function autoIdentifyTick() {
       runDetectionThisTick =
         !appState.auto.lastPrimaryFace ||
         startedAt - appState.auto.lastDetectAt >= appState.auto.detectIntervalMs;
-      const { embedding, primaryFace } = await detectAndEmbed({
+      const { embedding, primaryFace, faces } = await detectAndEmbed({
         overlayOnly: true,
         runDetection: runDetectionThisTick,
         reuseFaceBox: appState.auto.lastPrimaryFace
@@ -456,6 +457,7 @@ async function autoIdentifyTick() {
       appState.auto.lastPrimaryFace = primaryFace ? cloneFaceBox(primaryFace) : null;
       const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
       handleAutoBestMatch(best, threshold, minGap);
+      renderFrame(faces, primaryFace, { drawSource: false, best });
     }
   } catch (error) {
     resetAutoTracking();
@@ -615,6 +617,7 @@ function renderFrame(faces = [], primaryFace = null, options = {}) {
     return;
   }
   const drawSource = options.drawSource ?? false;
+  const best = options.best ?? null;
 
   const canvas = elements.frameCanvas;
   const ctx = canvas.getContext("2d");
@@ -624,10 +627,10 @@ function renderFrame(faces = [], primaryFace = null, options = {}) {
   if (drawSource) {
     ctx.drawImage(appState.sourceCanvas, 0, 0);
   }
-  drawFaceBoxes(ctx, faces, primaryFace);
+  drawFaceBoxes(ctx, faces, primaryFace, best);
 }
 
-function renderAutoOverlay(frameWidth, frameHeight, faces = [], primaryFace = null) {
+function renderAutoOverlay(frameWidth, frameHeight, faces = [], primaryFace = null, best = null) {
   const canvas = elements.frameCanvas;
   const ctx = canvas.getContext("2d");
   if (frameWidth > 0 && frameHeight > 0) {
@@ -635,24 +638,159 @@ function renderAutoOverlay(frameWidth, frameHeight, faces = [], primaryFace = nu
     canvas.height = frameHeight;
   }
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawFaceBoxes(ctx, faces, primaryFace);
+  drawFaceBoxes(ctx, faces, primaryFace, best);
 }
 
-function drawFaceBoxes(ctx, faces, primaryFace) {
+function drawFaceBoxes(ctx, faces, primaryFace, best = null) {
   for (const face of faces) {
-    const isPrimary = primaryFace && face === primaryFace;
-    ctx.strokeStyle = isPrimary ? "#00b873" : "#0f62fe";
-    ctx.lineWidth = isPrimary ? 3 : 2;
-    ctx.strokeRect(face.x, face.y, face.width, face.height);
-    ctx.fillStyle = isPrimary ? "#00b873" : "#0f62fe";
-    ctx.font = "14px sans-serif";
-    const scoreText = Number.isFinite(face.score) ? face.score.toFixed(2) : "--";
-    ctx.fillText(
-      `${isPrimary ? "Основное" : "Лицо"} ${scoreText}`,
-      face.x + 4,
-      Math.max(16, face.y - 6)
-    );
+    const isPrimary = isSameFaceBox(face, primaryFace);
+    const person = isPrimary ? best?.person : null;
+    const identity = person ? `${formatPerson(person)} [${person.personId}]` : "";
+    drawPremiumFaceBox(ctx, face, {
+      isPrimary,
+      identity,
+      matchState: isPrimary && best?.person ? (best.matched ? "MATCH" : "CANDIDATE") : "",
+      matchScore: isPrimary && Number.isFinite(best?.score) ? best.score : null
+    });
   }
+}
+
+function isSameFaceBox(face, primaryFace) {
+  if (!face || !primaryFace) {
+    return false;
+  }
+  return (
+    Math.abs(face.x - primaryFace.x) < 1 &&
+    Math.abs(face.y - primaryFace.y) < 1 &&
+    Math.abs(face.width - primaryFace.width) < 1 &&
+    Math.abs(face.height - primaryFace.height) < 1
+  );
+}
+
+function drawPremiumFaceBox(ctx, face, options = {}) {
+  const isPrimary = options.isPrimary ?? false;
+  const identity = options.identity ?? "";
+  const matchState = options.matchState ?? "";
+  const matchScore = options.matchScore;
+  const x = face.x;
+  const y = face.y;
+  const w = face.width;
+  const h = face.height;
+  const radius = Math.max(6, Math.min(16, Math.round(Math.min(w, h) * 0.09)));
+  const corner = Math.max(10, Math.min(30, Math.round(Math.min(w, h) * 0.24)));
+  const mainColor = isPrimary ? "#22d39b" : "#4b66ff";
+  const glowColor = isPrimary ? "rgba(34, 211, 155, 0.45)" : "rgba(75, 102, 255, 0.45)";
+  const detectionScore = Number.isFinite(face.score) ? face.score : null;
+  const detectionScoreText = detectionScore == null ? "--" : detectionScore.toFixed(2);
+  const matchScoreText = Number.isFinite(matchScore) ? matchScore.toFixed(2) : null;
+  const titleText = matchState
+    ? `${matchState} ${matchScoreText ?? detectionScoreText}`
+    : `${isPrimary ? "ACTIVE FACE" : "FACE"} ${detectionScoreText}`;
+
+  ctx.save();
+
+  // Soft halo around the frame to match premium dark style.
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = isPrimary ? 26 : 18;
+  ctx.lineWidth = isPrimary ? 3 : 2;
+  ctx.strokeStyle = mainColor;
+  drawRoundedRectPath(ctx, x, y, w, h, radius);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  drawCornerAccents(ctx, x, y, w, h, corner, mainColor, isPrimary ? 3 : 2);
+  drawFaceLabel(ctx, x, y, w, titleText, identity, isPrimary, mainColor);
+
+  ctx.restore();
+}
+
+function drawCornerAccents(ctx, x, y, w, h, cornerSize, color, lineWidth) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+
+  ctx.moveTo(x, y + cornerSize);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + cornerSize, y);
+
+  ctx.moveTo(x + w - cornerSize, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + cornerSize);
+
+  ctx.moveTo(x + w, y + h - cornerSize);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + w - cornerSize, y + h);
+
+  ctx.moveTo(x + cornerSize, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + h - cornerSize);
+
+  ctx.stroke();
+}
+
+function drawFaceLabel(ctx, x, y, width, title, subtitle, isPrimary, mainColor) {
+  const titleSize = Math.max(11, Math.min(15, Math.round(width * 0.07)));
+  const subtitleSize = Math.max(10, titleSize - 2);
+  const hasSubtitle = Boolean(subtitle);
+  ctx.font = `700 ${titleSize}px "Space Grotesk", sans-serif`;
+  const titleW = ctx.measureText(title).width;
+  let subtitleW = 0;
+  if (hasSubtitle) {
+    ctx.font = `600 ${subtitleSize}px "Space Grotesk", sans-serif`;
+    subtitleW = ctx.measureText(subtitle).width;
+  }
+  const paddingX = 10;
+  const paddingY = 6;
+  const lineGap = hasSubtitle ? 3 : 0;
+  const labelW = Math.max(titleW, subtitleW) + paddingX * 2;
+  const labelH = titleSize + (hasSubtitle ? subtitleSize + lineGap : 0) + paddingY * 2;
+  const labelX = x + 6;
+  const labelY = Math.max(8, y - labelH - 8);
+  const labelR = Math.min(10, Math.round(labelH / 2));
+
+  const gradient = ctx.createLinearGradient(labelX, labelY, labelX + labelW, labelY);
+  if (isPrimary) {
+    gradient.addColorStop(0, "rgba(10, 72, 56, 0.92)");
+    gradient.addColorStop(1, "rgba(14, 120, 92, 0.92)");
+  } else {
+    gradient.addColorStop(0, "rgba(20, 36, 118, 0.92)");
+    gradient.addColorStop(1, "rgba(28, 63, 212, 0.92)");
+  }
+
+  ctx.fillStyle = gradient;
+  drawRoundedRectPath(ctx, labelX, labelY, labelW, labelH, labelR);
+  ctx.fill();
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = mainColor;
+  drawRoundedRectPath(ctx, labelX, labelY, labelW, labelH, labelR);
+  ctx.stroke();
+
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#f6f9ff";
+  ctx.font = `700 ${titleSize}px "Space Grotesk", sans-serif`;
+  ctx.fillText(title, labelX + paddingX, labelY + paddingY);
+
+  if (hasSubtitle) {
+    ctx.fillStyle = "rgba(234, 241, 255, 0.92)";
+    ctx.font = `600 ${subtitleSize}px "Space Grotesk", sans-serif`;
+    ctx.fillText(subtitle, labelX + paddingX, labelY + paddingY + titleSize + lineGap);
+  }
+}
+
+function drawRoundedRectPath(ctx, x, y, w, h, r) {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.arcTo(x + w, y, x + w, y + radius, radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+  ctx.lineTo(x + radius, y + h);
+  ctx.arcTo(x, y + h, x, y + h - radius, radius);
+  ctx.lineTo(x, y + radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.closePath();
 }
 
 function hasSourceFrame() {
