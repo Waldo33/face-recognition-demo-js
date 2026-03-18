@@ -385,9 +385,7 @@ async function startAutoIdentification() {
   resetAutoConfirmation();
   appState.auto.running = true;
   setAutoButtons();
-  setAutoResult(
-    `Автораспознавание запущено (проверка ${appState.auto.intervalMs} мс, детекция ${appState.auto.detectIntervalMs} мс, подтверждение ${appState.auto.confirmFrames} кадра/кадров).`
-  );
+  setAutoResult("Распознавание запущено.");
   setStatus(
     appState.auto.useWorker
       ? "Автораспознавание выполняется в воркере."
@@ -547,12 +545,12 @@ function handleAutoBestMatch(best, threshold, minGap) {
     const confirmProgress = `${appState.auto.pendingCount}/${appState.auto.confirmFrames}`;
     if (appState.auto.pendingCount >= appState.auto.confirmFrames) {
       setAutoResult(
-        `Совпадение: ${title} (id: ${best.person.personId}, сэмпл ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | подтверждено ${confirmProgress}`,
+        `Совпадение: ${title} [${best.person.personId}] • score ${best.score.toFixed(3)} • ${confirmProgress}`,
         "ok"
       );
     } else {
       setAutoResult(
-        `Кандидат: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | подтверждение ${confirmProgress}`,
+        `Кандидат: ${title} [${best.person.personId}] • score ${best.score.toFixed(3)} • ${confirmProgress}`,
         "warn"
       );
     }
@@ -563,7 +561,7 @@ function handleAutoBestMatch(best, threshold, minGap) {
   const title = formatPerson(best.person);
   const gapText = best.gap == null ? "н/д" : best.gap.toFixed(4);
   setAutoResult(
-    `Точного совпадения нет (порог=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Ближайший: ${title} (сэмпл ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
+    `Нет точного совпадения • ${title} • score ${best.score.toFixed(3)} • gap ${gapText}`,
     "warn"
   );
 }
@@ -901,6 +899,7 @@ function setMessage(element, text, kind = "") {
     element.classList.add(kind);
   }
   element.textContent = text;
+  element.title = text;
 }
 
 function setAutoButtons() {

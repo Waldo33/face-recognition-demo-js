@@ -208,6 +208,9 @@ h2 {
 }
 
 #camera {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: block;
   height: 100%;
   object-fit: cover;
@@ -222,6 +225,7 @@ h2 {
   height: 100%;
   background: transparent;
   pointer-events: none;
+  z-index: 8;
 }
 
 .row {
@@ -332,18 +336,27 @@ button.danger:hover {
 .status,
 .result {
   margin: 0;
+  display: flex;
+  align-items: center;
   border-radius: 12px;
   border: 1px solid var(--line-soft);
   background: rgba(255, 255, 255, 0.03);
   color: #ccd6f6;
   padding: 11px 13px;
   font-size: 0.84rem;
+  min-height: 46px;
+  max-height: 46px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #autoMetrics {
   font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.75rem;
   color: #8d9ac0;
+  min-height: 40px;
+  max-height: 40px;
 }
 
 .live-result {
@@ -353,6 +366,8 @@ button.danger:hover {
   box-shadow: inset 0 0 0 1px rgba(29, 190, 129, 0.2);
   font-size: 0.95rem;
   font-weight: 700;
+  min-height: 50px;
+  max-height: 50px;
 }
 
 .result.ok {
@@ -596,36 +611,102 @@ body.modal-open {
 }
 
 @media (max-width: 860px) {
+  html,
   body {
-    overflow: auto;
+    height: 100dvh;
+  }
+
+  body {
+    overflow: hidden;
   }
 
   .app {
-    height: auto;
-    min-height: 100vh;
-    padding: 12px;
-    overflow: visible;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: 8px;
+    overflow: hidden;
   }
 
   .viewer-card {
-    height: auto;
+    height: calc(100dvh - 16px);
+    padding: 10px;
+    gap: 8px;
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    overflow: hidden;
   }
 
   .hero-head {
     flex-direction: column;
-    padding-bottom: 8px;
+    gap: 6px;
+    padding-bottom: 6px;
+  }
+
+  h1 {
+    font-size: 1.22rem;
+    gap: 8px;
+  }
+
+  h1::before {
+    width: 6px;
+    height: 22px;
+  }
+
+  .muted {
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+  }
+
+  .links-bar {
+    gap: 6px;
+  }
+
+  .links-bar a {
+    padding: 6px 8px;
+    font-size: 0.68rem;
   }
 
   .viewer {
-    max-height: none;
+    width: min(100%, calc(46dvh * 16 / 9));
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    align-self: center;
   }
 
   .controls {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  #toggleRecognitionBtn {
+    grid-column: 1 / -1;
   }
 
   .capture-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #closeCapturePanelBtn {
+    grid-column: 1 / -1;
+  }
+
+  .capture-panel {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 44;
+    background: rgba(11, 14, 28, 0.95);
+    backdrop-filter: blur(10px);
+  }
+
+  button,
+  .file-input {
+    padding: 9px 10px;
+    font-size: 0.76rem;
+    border-radius: 10px;
   }
 
   .form-grid,
@@ -633,10 +714,32 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
+  #status {
+    display: none;
+  }
+
+  .status,
+  .result {
+    padding: 8px 10px;
+    font-size: 0.76rem;
+    border-radius: 10px;
+    min-height: 40px;
+    max-height: 40px;
+  }
+
   .live-result {
-    position: sticky;
-    top: 8px;
-    z-index: 20;
+    position: static;
+    font-size: 0.82rem;
+    padding: 9px 10px;
+    min-height: 44px;
+    max-height: 44px;
+  }
+
+  #autoMetrics {
+    font-size: 0.64rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .modal {
@@ -645,6 +748,33 @@ body.modal-open {
 
   .modal-card {
     max-height: calc(100vh - 20px);
+  }
+}
+
+@media (max-width: 860px) and (max-height: 740px) {
+  .muted {
+    display: none;
+  }
+
+  .links-bar {
+    display: flex;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .links-bar a {
+    flex: 1 1 0;
+    text-align: center;
+    padding: 5px 7px;
+    font-size: 0.64rem;
+  }
+
+  .viewer-card {
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  #autoMetrics {
+    display: none;
   }
 }
 

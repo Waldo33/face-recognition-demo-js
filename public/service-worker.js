@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v1.0.0";
+const CACHE_VERSION = "v1.0.1";
 const CACHE_PREFIX = "face-id-demo";
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const MODEL_CACHE = `${CACHE_PREFIX}-models-${CACHE_VERSION}`;
