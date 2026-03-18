@@ -10,9 +10,11 @@ import {
 import { createDetectorSession, detectFaces, getPrimaryFace } from "./face/ultraface.js";
 
 const MODEL_PATHS = {
-  detector: new URL("./models/version-RFB-320.onnx", window.location.href).toString(),
-  recognizer: new URL("./models/w600k_mbf.onnx", window.location.href).toString()
+  detector: "",
+  recognizer: ""
 };
+
+const MODEL_CANDIDATE_BASES = ["./models/", "./public/models/"];
 
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
 ort.env.wasm.simd = true;
@@ -82,6 +84,7 @@ appState.sourceCtx = appState.sourceCanvas.getContext("2d");
 
 async function init() {
   bindEvents();
+  await resolveModelPaths();
   void registerServiceWorker();
   await refreshPeopleCache();
   await renderPeopleList();
@@ -91,6 +94,43 @@ async function init() {
   setAutoResult("Автораспознавание не запущено.");
   setEnrollResult("Добавление ещё не запускалось.");
   updateAutoMetrics(null);
+}
+
+async function resolveModelPaths() {
+  for (const base of MODEL_CANDIDATE_BASES) {
+    const detectorUrl = new URL(`./${base.replace(/^\.\//, "")}version-RFB-320.onnx`, window.location.href).toString();
+    const recognizerUrl = new URL(`./${base.replace(/^\.\//, "")}w600k_mbf.onnx`, window.location.href).toString();
+
+    // HEAD can be blocked on some static hosts, so we fallback to GET if needed.
+    const detectorOk = await urlExists(detectorUrl);
+    const recognizerOk = await urlExists(recognizerUrl);
+    if (detectorOk && recognizerOk) {
+      MODEL_PATHS.detector = detectorUrl;
+      MODEL_PATHS.recognizer = recognizerUrl;
+      return;
+    }
+  }
+
+  MODEL_PATHS.detector = new URL("./models/version-RFB-320.onnx", window.location.href).toString();
+  MODEL_PATHS.recognizer = new URL("./models/w600k_mbf.onnx", window.location.href).toString();
+}
+
+async function urlExists(url) {
+  try {
+    const head = await fetch(url, { method: "HEAD", cache: "no-store" });
+    if (head.ok) {
+      return true;
+    }
+  } catch {
+    // Fallback to GET when HEAD is not supported.
+  }
+
+  try {
+    const get = await fetch(url, { method: "GET", cache: "no-store" });
+    return get.ok;
+  } catch {
+    return false;
+  }
 }
 
 function bindEvents() {
