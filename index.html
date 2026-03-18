@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Face Identification Demo</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="card viewer-card">
+        <h1>Face Identification Demo</h1>
+        <p class="muted">
+          ONNXRuntime Web + UltraFace detector + InsightFace embeddings
+        </p>
+
+        <div class="viewer">
+          <video id="camera" autoplay muted playsinline></video>
+          <canvas id="frameCanvas"></canvas>
+        </div>
+
+        <div class="row controls">
+          <button id="startCameraBtn">Start Camera</button>
+          <button id="stopCameraBtn" class="secondary">Stop Camera</button>
+          <button id="captureBtn">Capture Frame</button>
+          <label class="file-input">
+            Upload Photo
+            <input id="imageInput" type="file" accept="image/*" />
+          </label>
+        </div>
+
+        <p id="status" class="status">Load a frame from camera or image.</p>
+      </section>
+
+      <section class="card">
+        <h2>Enrollment</h2>
+        <div class="form-grid">
+          <label>
+            Person ID
+            <input id="personIdInput" type="text" placeholder="e.g. emp-1001" />
+          </label>
+          <label>
+            First Name
+            <input id="firstNameInput" type="text" placeholder="John" />
+          </label>
+          <label>
+            Last Name
+            <input id="lastNameInput" type="text" placeholder="Doe" />
+          </label>
+        </div>
+
+        <div class="row">
+          <button id="enrollBtn">Detect Face + Save Embedding</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Identification</h2>
+        <div class="form-grid single">
+          <label>
+            Match Threshold (cosine)
+            <input
+              id="thresholdInput"
+              type="number"
+              min="0.1"
+              max="0.99"
+              step="0.01"
+              value="0.52"
+            />
+          </label>
+        </div>
+        <div class="row">
+          <button id="identifyBtn">Detect Face + Identify</button>
+        </div>
+        <p id="result" class="result">No identification run yet.</p>
+      </section>
+
+      <section class="card">
+        <div class="row between">
+          <h2>Local Embedding Cache</h2>
+          <button id="clearCacheBtn" class="danger">Clear Cache</button>
+        </div>
+        <p class="muted">
+          All data is stored only in browser localStorage on this device.
+        </p>
+        <div id="peopleList" class="people-list"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
