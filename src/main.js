@@ -15,6 +15,18 @@ const MODEL_PATHS = {
 };
 
 const MODEL_CANDIDATE_BASES = ["./models/", "./public/models/"];
+const ORT_CDN_ASSETS = [
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.all.min.mjs",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.wasm"
+];
+const AUTO_WORKER_URL = new URL("./workers/auto-infer.worker.js", import.meta.url);
 
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
 ort.env.wasm.simd = true;
@@ -85,7 +97,8 @@ appState.sourceCtx = appState.sourceCanvas.getContext("2d");
 async function init() {
   bindEvents();
   await resolveModelPaths();
-  void registerServiceWorker();
+  await registerServiceWorker();
+  void warmupOfflineAssets();
   await refreshPeopleCache();
   await renderPeopleList();
   switchCase("auto");
@@ -787,8 +800,8 @@ async function registerServiceWorker() {
   }
 
   try {
-    const swUrl = new URL("../service-worker.js", import.meta.url);
-    const registration = await navigator.serviceWorker.register(swUrl);
+    const swUrl = new URL("./service-worker.js", window.location.href).toString();
+    const registration = await navigator.serviceWorker.register(swUrl, { scope: "./" });
 
     if (registration.waiting) {
       registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -805,10 +818,42 @@ async function registerServiceWorker() {
         }
       });
     });
+
+    const reloadKey = "sw-controller-reload-done";
+    if (!navigator.serviceWorker.controller && !sessionStorage.getItem(reloadKey)) {
+      sessionStorage.setItem(reloadKey, "1");
+      window.location.reload();
+      return;
+    }
+    if (navigator.serviceWorker.controller) {
+      sessionStorage.removeItem(reloadKey);
+    }
   } catch (error) {
     const message = error?.message || "Не удалось зарегистрировать Service Worker.";
     setStatus(`${message} Работа продолжится онлайн.`);
   }
+}
+
+async function warmupOfflineAssets() {
+  if (!navigator.onLine) {
+    return;
+  }
+  if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
+    return;
+  }
+
+  const urls = [
+    MODEL_PATHS.detector,
+    MODEL_PATHS.recognizer,
+    AUTO_WORKER_URL.toString(),
+    ...ORT_CDN_ASSETS
+  ];
+
+  await Promise.all(
+    urls.map((url) =>
+      fetch(url, { cache: "reload" }).catch(() => null)
+    )
+  );
 }
 
 function updateAutoMetrics(latencyMs, ranDetection = false) {
@@ -930,7 +975,7 @@ function supportsAutoWorker() {
 }
 
 function createAutoWorkerInstance() {
-  const worker = new Worker(new URL("./workers/auto-infer.worker.js", import.meta.url), {
+  const worker = new Worker(AUTO_WORKER_URL, {
     type: "module"
   });
 

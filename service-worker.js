@@ -16,15 +16,28 @@ const CDN_PREFIXES = [
   "https://cdn.jsdelivr.net/npm/onnxruntime-web/",
   "https://cdn.jsdelivr.net/npm/onnxruntime-web@"
 ];
+const CDN_ASSETS = [
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.all.min.mjs",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.jsep.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.wasm",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.wasm"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE);
       const modelCache = await caches.open(MODEL_CACHE);
+      const cdnCache = await caches.open(CDN_CACHE);
 
       await cacheBestEffort(staticCache, APP_SHELL_PATHS);
       await cacheBestEffort(modelCache, MODEL_PATHS);
+      await cacheBestEffort(cdnCache, CDN_ASSETS);
 
       await self.skipWaiting();
     })()
