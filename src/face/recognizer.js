@@ -3,9 +3,9 @@ import { l2Normalize } from "./math.js";
 
 const CROP_SIZE = 112;
 
-const cropCanvas = document.createElement("canvas");
+const cropCanvas = createCanvas();
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
-const tensorCanvas = document.createElement("canvas");
+const tensorCanvas = createCanvas();
 const tensorCtx = tensorCanvas.getContext("2d", { willReadFrequently: true });
 
 export function createRecognizerSession(modelUrl) {
@@ -95,6 +95,16 @@ function getSourceSize(source) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function createCanvas() {
+  if (typeof OffscreenCanvas !== "undefined") {
+    return new OffscreenCanvas(1, 1);
+  }
+  if (typeof document !== "undefined") {
+    return document.createElement("canvas");
+  }
+  throw new Error("No canvas implementation available.");
 }
 
 function pickEmbeddingTensor(outputMap) {

@@ -49,12 +49,19 @@ const appState = {
   stream: null,
   detectorSession: null,
   recognizerSession: null,
+  worker: {
+    instance: null,
+    ready: false,
+    nextRequestId: 1,
+    pending: new Map()
+  },
   busy: false,
   peopleCache: [],
   sourceCanvas: document.createElement("canvas"),
   sourceCtx: null,
   auto: {
     running: false,
+    useWorker: false,
     timerId: null,
     intervalMs: 320,
     confirmFrames: 3,
@@ -257,7 +264,13 @@ async function startAutoIdentification() {
     throw new Error("Cache is empty. Add at least one person first.");
   }
 
-  await ensureModels();
+  appState.auto.useWorker = await ensureAutoWorker();
+  if (!appState.auto.useWorker) {
+    await ensureModels();
+    setStatus("Auto worker is unavailable, running inference on main thread.");
+  } else {
+    await workerCall("resetTracking", {});
+  }
 
   appState.auto.intervalMs = toNumberInRange(
     elements.autoIntervalInput.value,
@@ -282,7 +295,11 @@ async function startAutoIdentification() {
   setAutoResult(
     `Auto identification started (check ${appState.auto.intervalMs}ms, detect ${appState.auto.detectIntervalMs}ms, confirm ${appState.auto.confirmFrames} frames).`
   );
-  setStatus("Auto identification is running.");
+  setStatus(
+    appState.auto.useWorker
+      ? "Auto identification is running in worker."
+      : "Auto identification is running."
+  );
   void autoIdentifyTick();
 }
 
@@ -290,6 +307,9 @@ function stopAutoIdentification(statusText = "Auto identification stopped.") {
   if (appState.auto.timerId) {
     window.clearTimeout(appState.auto.timerId);
     appState.auto.timerId = null;
+  }
+  if (appState.worker.ready) {
+    void workerCall("resetTracking", {}).catch(() => {});
   }
   appState.auto.running = false;
   resetAutoTracking();
@@ -306,6 +326,7 @@ async function autoIdentifyTick() {
   }
 
   let runDetectionThisTick = false;
+  let latencyMs = null;
   const startedAt = performance.now();
   try {
     if (!appState.stream || !elements.video.videoWidth) {
@@ -315,69 +336,77 @@ async function autoIdentifyTick() {
       throw new Error("Cache is empty. Add at least one person.");
     }
 
-    setSourceFrom(elements.video, { maxSide: 480 });
     const baseThreshold = toNumberInRange(
       elements.autoThresholdInput.value,
       0.1,
       0.99,
       0.55
     );
-    const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
     const minGap = appState.peopleCache.length > 1 ? 0.03 : 0;
-    runDetectionThisTick =
-      !appState.auto.lastPrimaryFace ||
-      startedAt - appState.auto.lastDetectAt >= appState.auto.detectIntervalMs;
-    const { embedding, primaryFace } = await detectAndEmbed({
-      overlayOnly: true,
-      runDetection: runDetectionThisTick,
-      reuseFaceBox: appState.auto.lastPrimaryFace
-    });
-    if (runDetectionThisTick) {
-      appState.auto.lastDetectAt = startedAt;
-    }
-    appState.auto.lastPrimaryFace = primaryFace ? cloneFaceBox(primaryFace) : null;
-    const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
 
-    if (best.matched) {
-      const candidateId = best.person.personId;
-      if (appState.auto.pendingPersonId === candidateId) {
-        appState.auto.pendingCount += 1;
-      } else {
-        appState.auto.pendingPersonId = candidateId;
-        appState.auto.pendingCount = 1;
-      }
-
-      const title = formatPerson(best.person);
-      const confirmProgress = `${appState.auto.pendingCount}/${appState.auto.confirmFrames}`;
-      if (appState.auto.pendingCount >= appState.auto.confirmFrames) {
-        setAutoResult(
-          `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | confirmed ${confirmProgress}`,
-          "ok"
-        );
-      } else {
-        setAutoResult(
-          `Candidate: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | confirming ${confirmProgress}`,
-          "warn"
-        );
-      }
-    } else if (best.person) {
-      resetAutoConfirmation();
-      const title = formatPerson(best.person);
-      const gapText = best.gap == null ? "n/a" : best.gap.toFixed(4);
-      setAutoResult(
-        `No exact match (threshold=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Closest: ${title} (sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
-        "warn"
+    if (appState.auto.useWorker) {
+      const frameResult = await processAutoFrameInWorker({
+        baseThreshold,
+        minGap,
+        maxSide: 480,
+        detectIntervalMs: appState.auto.detectIntervalMs
+      });
+      latencyMs = frameResult.latencyMs;
+      runDetectionThisTick = !!frameResult.ranDetection;
+      renderAutoOverlay(
+        frameResult.frameWidth,
+        frameResult.frameHeight,
+        frameResult.faces || [],
+        frameResult.primaryFace
       );
+
+      if (frameResult.noFace || !frameResult.best) {
+        resetAutoConfirmation();
+        setAutoResult("No face detected in current frame.", "warn");
+      } else {
+        handleAutoBestMatch(
+          frameResult.best,
+          frameResult.threshold,
+          frameResult.minGap
+        );
+      }
     } else {
-      resetAutoConfirmation();
-      setAutoResult("No match found.", "warn");
+      setSourceFrom(elements.video, { maxSide: 480 });
+      const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
+      runDetectionThisTick =
+        !appState.auto.lastPrimaryFace ||
+        startedAt - appState.auto.lastDetectAt >= appState.auto.detectIntervalMs;
+      const { embedding, primaryFace } = await detectAndEmbed({
+        overlayOnly: true,
+        runDetection: runDetectionThisTick,
+        reuseFaceBox: appState.auto.lastPrimaryFace
+      });
+      if (runDetectionThisTick) {
+        appState.auto.lastDetectAt = startedAt;
+      }
+      appState.auto.lastPrimaryFace = primaryFace ? cloneFaceBox(primaryFace) : null;
+      const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
+      handleAutoBestMatch(best, threshold, minGap);
     }
   } catch (error) {
     resetAutoTracking();
     resetAutoConfirmation();
     const message = error?.message || "Auto identification failed.";
-    setAutoResult(`Auto identification failed: ${message}`, "warn");
-    setStatus(message);
+    let switchedFromWorker = false;
+
+    if (appState.auto.useWorker) {
+      switchedFromWorker = true;
+      appState.auto.useWorker = false;
+      appState.worker.ready = false;
+      await ensureModels();
+      setStatus("Worker failed, switched to main-thread inference.");
+      setAutoResult("Worker failed once, fallback to main-thread inference.", "warn");
+    }
+
+    if (!switchedFromWorker) {
+      setAutoResult(`Auto identification failed: ${message}`, "warn");
+      setStatus(message);
+    }
 
     if (
       message.includes("Camera is not available") ||
@@ -388,9 +417,9 @@ async function autoIdentifyTick() {
     }
   }
 
-  const latency = performance.now() - startedAt;
-  appState.auto.lastLatencyMs = latency;
-  updateAutoMetrics(latency, runDetectionThisTick);
+  const finalLatencyMs = latencyMs ?? (performance.now() - startedAt);
+  appState.auto.lastLatencyMs = finalLatencyMs;
+  updateAutoMetrics(finalLatencyMs, runDetectionThisTick);
 
   if (!appState.auto.running) {
     return;
@@ -401,6 +430,47 @@ async function autoIdentifyTick() {
   appState.auto.timerId = window.setTimeout(() => {
     void autoIdentifyTick();
   }, waitMs);
+}
+
+function handleAutoBestMatch(best, threshold, minGap) {
+  if (!best?.person) {
+    resetAutoConfirmation();
+    setAutoResult("No match found.", "warn");
+    return;
+  }
+
+  if (best.matched) {
+    const candidateId = best.person.personId;
+    if (appState.auto.pendingPersonId === candidateId) {
+      appState.auto.pendingCount += 1;
+    } else {
+      appState.auto.pendingPersonId = candidateId;
+      appState.auto.pendingCount = 1;
+    }
+
+    const title = formatPerson(best.person);
+    const confirmProgress = `${appState.auto.pendingCount}/${appState.auto.confirmFrames}`;
+    if (appState.auto.pendingCount >= appState.auto.confirmFrames) {
+      setAutoResult(
+        `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | confirmed ${confirmProgress}`,
+        "ok"
+      );
+    } else {
+      setAutoResult(
+        `Candidate: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | confirming ${confirmProgress}`,
+        "warn"
+      );
+    }
+    return;
+  }
+
+  resetAutoConfirmation();
+  const title = formatPerson(best.person);
+  const gapText = best.gap == null ? "n/a" : best.gap.toFixed(4);
+  setAutoResult(
+    `No exact match (threshold=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Closest: ${title} (sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
+    "warn"
+  );
 }
 
 async function detectAndEmbed(options = {}) {
@@ -485,7 +555,21 @@ function renderFrame(faces = [], primaryFace = null, options = {}) {
   if (drawSource) {
     ctx.drawImage(appState.sourceCanvas, 0, 0);
   }
+  drawFaceBoxes(ctx, faces, primaryFace);
+}
 
+function renderAutoOverlay(frameWidth, frameHeight, faces = [], primaryFace = null) {
+  const canvas = elements.frameCanvas;
+  const ctx = canvas.getContext("2d");
+  if (frameWidth > 0 && frameHeight > 0) {
+    canvas.width = frameWidth;
+    canvas.height = frameHeight;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawFaceBoxes(ctx, faces, primaryFace);
+}
+
+function drawFaceBoxes(ctx, faces, primaryFace) {
   for (const face of faces) {
     const isPrimary = primaryFace && face === primaryFace;
     ctx.strokeStyle = isPrimary ? "#00b873" : "#0f62fe";
@@ -508,6 +592,9 @@ function hasSourceFrame() {
 
 async function refreshPeopleCache() {
   appState.peopleCache = await listPeople();
+  if (appState.worker.ready) {
+    await syncPeopleToWorker();
+  }
 }
 
 async function renderPeopleList() {
@@ -673,6 +760,117 @@ function loadImageElement(url) {
     img.onerror = () => reject(new Error("Failed to load selected image."));
     img.src = url;
   });
+}
+
+async function ensureAutoWorker() {
+  if (!supportsAutoWorker()) {
+    return false;
+  }
+
+  if (appState.worker.ready) {
+    return true;
+  }
+
+  if (!appState.worker.instance) {
+    createAutoWorkerInstance();
+  }
+
+  try {
+    await workerCall("init", { modelPaths: MODEL_PATHS });
+    appState.worker.ready = true;
+    await syncPeopleToWorker();
+    return true;
+  } catch {
+    appState.worker.ready = false;
+    return false;
+  }
+}
+
+function supportsAutoWorker() {
+  return (
+    typeof Worker !== "undefined" &&
+    typeof OffscreenCanvas !== "undefined" &&
+    typeof createImageBitmap === "function"
+  );
+}
+
+function createAutoWorkerInstance() {
+  const worker = new Worker(new URL("./workers/auto-infer.worker.js", import.meta.url), {
+    type: "module"
+  });
+
+  worker.onmessage = (event) => {
+    const { requestId, ok, payload, error } = event.data || {};
+    const pending = appState.worker.pending.get(requestId);
+    if (!pending) {
+      return;
+    }
+    appState.worker.pending.delete(requestId);
+    if (ok) {
+      pending.resolve(payload);
+    } else {
+      pending.reject(new Error(error || "Worker request failed."));
+    }
+  };
+
+  worker.onerror = (event) => {
+    const message = event?.message || "Worker error.";
+    for (const [, pending] of appState.worker.pending) {
+      pending.reject(new Error(message));
+    }
+    appState.worker.pending.clear();
+    appState.worker.ready = false;
+  };
+
+  appState.worker.instance = worker;
+}
+
+function workerCall(type, payload = {}, transfer = []) {
+  if (!appState.worker.instance) {
+    return Promise.reject(new Error("Worker is not initialized."));
+  }
+
+  const requestId = appState.worker.nextRequestId++;
+  return new Promise((resolve, reject) => {
+    appState.worker.pending.set(requestId, { resolve, reject });
+    appState.worker.instance.postMessage({ requestId, type, payload }, transfer);
+  });
+}
+
+async function syncPeopleToWorker() {
+  if (!appState.worker.ready) {
+    return;
+  }
+
+  const payloadPeople = appState.peopleCache.map((person) => ({
+    personId: person.personId,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    sampleCount: person.sampleCount,
+    embeddings: Array.isArray(person.embeddings) ? person.embeddings : []
+  }));
+  await workerCall("setPeople", { people: payloadPeople });
+}
+
+async function processAutoFrameInWorker({
+  baseThreshold,
+  minGap,
+  maxSide,
+  detectIntervalMs
+}) {
+  const imageBitmap = await createImageBitmap(elements.video);
+  return workerCall(
+    "processFrame",
+    {
+      imageBitmap,
+      baseThreshold,
+      minGap,
+      maxSide,
+      detectIntervalMs,
+      timestamp: performance.now()
+    },
+    [imageBitmap]
+  );
 }
 
 init().catch((error) => {

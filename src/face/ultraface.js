@@ -14,7 +14,7 @@ const ULTRAFACE_CONFIG = {
   strides: [8, 16, 32, 64]
 };
 
-const sharedCanvas = document.createElement("canvas");
+const sharedCanvas = createCanvas();
 const sharedCtx = sharedCanvas.getContext("2d", { willReadFrequently: true });
 const priors = generatePriors(ULTRAFACE_CONFIG);
 
@@ -200,4 +200,14 @@ function getSourceSize(source) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function createCanvas() {
+  if (typeof OffscreenCanvas !== "undefined") {
+    return new OffscreenCanvas(1, 1);
+  }
+  if (typeof document !== "undefined") {
+    return document.createElement("canvas");
+  }
+  throw new Error("No canvas implementation available.");
 }
