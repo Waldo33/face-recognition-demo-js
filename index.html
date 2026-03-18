@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Демо распознавания лиц</title>
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
     <main class="app">
@@ -34,24 +34,42 @@
         <div class="row controls">
           <button id="startCameraBtn">Запустить камеру</button>
           <button id="stopCameraBtn" class="secondary">Остановить камеру</button>
+          <button id="startAutoBtn">Запустить автораспознавание</button>
+          <button id="stopAutoBtn" class="secondary">Остановить автораспознавание</button>
+        </div>
+
+        <div class="row quick-actions">
+          <button id="openSettingsBtn" class="secondary">Настройки распознавания</button>
+          <button id="openEnrollBtn" class="secondary">Добавить человека</button>
+          <button id="openCacheBtn" class="secondary">Локальный кэш</button>
         </div>
 
         <p id="status" class="status">Запустите камеру и выберите режим ниже.</p>
         <p id="autoResult" class="result live-result">Автораспознавание не запущено.</p>
+        <p id="autoMetrics" class="status">Задержка: - мс | FPS инференса: - | Проверок/с: -</p>
       </section>
+    </main>
 
-      <section class="card workflow-card">
+    <div id="workflowModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="workflowModal"></div>
+      <section class="card modal-card workflow-card">
+        <div class="modal-head">
+          <h2>Управление распознаванием</h2>
+          <button type="button" class="secondary modal-close" data-close-modal="workflowModal">
+            Закрыть
+          </button>
+        </div>
         <div class="tab-row">
           <button id="autoCaseTab" class="tab active" type="button">
-            1. Автоматическое распознавание
+            Настройки распознавания
           </button>
           <button id="enrollCaseTab" class="tab" type="button">
-            2. Добавить человека
+            Добавить человека
           </button>
         </div>
 
         <section id="autoCase" class="case active">
-          <h2>Автоматическое распознавание</h2>
+          <h2>Параметры автораспознавания</h2>
           <p class="muted">
             Периодическая проверка с камеры без анализа каждого кадра.
           </p>
@@ -90,11 +108,7 @@
               />
             </label>
           </div>
-          <div class="row">
-            <button id="startAutoBtn">Запустить автораспознавание</button>
-            <button id="stopAutoBtn" class="secondary">Остановить автораспознавание</button>
-          </div>
-          <p id="autoMetrics" class="status">Задержка: - мс | FPS инференса: - | Проверок/с: -</p>
+          <p class="muted">Запуск и остановка автораспознавания доступны на главном экране.</p>
         </section>
 
         <section id="enrollCase" class="case hidden">
@@ -135,10 +149,18 @@
           <p id="enrollResult" class="result">Добавление ещё не запускалось.</p>
         </section>
       </section>
+    </div>
 
-      <section class="card cache-card">
-        <div class="row between">
+    <div id="cacheModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="cacheModal"></div>
+      <section class="card modal-card cache-card">
+        <div class="modal-head">
           <h2>Локальный кэш эмбеддингов</h2>
+          <button type="button" class="secondary modal-close" data-close-modal="cacheModal">
+            Закрыть
+          </button>
+        </div>
+        <div class="row between">
           <button id="clearCacheBtn" class="danger">Очистить кэш</button>
         </div>
         <p class="muted">
@@ -146,8 +168,8 @@
         </p>
         <div id="peopleList" class="people-list"></div>
       </section>
-    </main>
+    </div>
 
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>

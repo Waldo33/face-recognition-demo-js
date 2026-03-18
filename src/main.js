@@ -10,8 +10,8 @@ import {
 import { createDetectorSession, detectFaces, getPrimaryFace } from "./face/ultraface.js";
 
 const MODEL_PATHS = {
-  detector: "/models/version-RFB-320.onnx",
-  recognizer: "/models/w600k_mbf.onnx"
+  detector: new URL("./models/version-RFB-320.onnx", window.location.href).toString(),
+  recognizer: new URL("./models/w600k_mbf.onnx", window.location.href).toString()
 };
 
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
@@ -23,6 +23,11 @@ const elements = {
   status: document.getElementById("status"),
   startCameraBtn: document.getElementById("startCameraBtn"),
   stopCameraBtn: document.getElementById("stopCameraBtn"),
+  openSettingsBtn: document.getElementById("openSettingsBtn"),
+  openEnrollBtn: document.getElementById("openEnrollBtn"),
+  openCacheBtn: document.getElementById("openCacheBtn"),
+  workflowModal: document.getElementById("workflowModal"),
+  cacheModal: document.getElementById("cacheModal"),
   autoCaseTab: document.getElementById("autoCaseTab"),
   enrollCaseTab: document.getElementById("enrollCaseTab"),
   autoCase: document.getElementById("autoCase"),
@@ -90,6 +95,21 @@ async function init() {
 function bindEvents() {
   elements.startCameraBtn.addEventListener("click", () => runSafe(startCamera));
   elements.stopCameraBtn.addEventListener("click", stopCamera);
+  elements.openSettingsBtn.addEventListener("click", () => {
+    switchCase("auto");
+    openModal(elements.workflowModal);
+  });
+  elements.openEnrollBtn.addEventListener("click", () => {
+    switchCase("enroll");
+    openModal(elements.workflowModal);
+  });
+  elements.openCacheBtn.addEventListener("click", () =>
+    runSafe(async () => {
+      await refreshPeopleCache();
+      await renderPeopleList();
+      openModal(elements.cacheModal);
+    })
+  );
   elements.autoCaseTab.addEventListener("click", () => switchCase("auto"));
   elements.enrollCaseTab.addEventListener("click", () => switchCase("enroll"));
   elements.startAutoBtn.addEventListener("click", () => runSafe(startAutoIdentification));
@@ -100,6 +120,7 @@ function bindEvents() {
   );
   elements.enrollBtn.addEventListener("click", () => runSafe(enrollFace));
   elements.clearCacheBtn.addEventListener("click", () => runSafe(clearCache));
+  bindModalEvents();
 }
 
 async function runSafe(task) {
@@ -122,6 +143,9 @@ async function runSafe(task) {
 
 function toggleBusyControls(disabled) {
   elements.startCameraBtn.disabled = disabled;
+  elements.openSettingsBtn.disabled = disabled;
+  elements.openEnrollBtn.disabled = disabled;
+  elements.openCacheBtn.disabled = disabled;
   elements.captureEnrollBtn.disabled = disabled;
   elements.enrollBtn.disabled = disabled;
   elements.clearCacheBtn.disabled = disabled;
@@ -674,6 +698,55 @@ function setMessage(element, text, kind = "") {
 function setAutoButtons() {
   elements.startAutoBtn.disabled = appState.auto.running || appState.busy;
   elements.stopAutoBtn.disabled = !appState.auto.running;
+}
+
+function bindModalEvents() {
+  for (const closer of document.querySelectorAll("[data-close-modal]")) {
+    closer.addEventListener("click", () => {
+      const modalId = closer.getAttribute("data-close-modal");
+      if (modalId) {
+        closeModalById(modalId);
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    closeModal(elements.workflowModal);
+    closeModal(elements.cacheModal);
+  });
+}
+
+function openModal(modal) {
+  if (!modal) {
+    return;
+  }
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeModal(modal) {
+  if (!modal || modal.classList.contains("hidden")) {
+    return;
+  }
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  if (elements.workflowModal.classList.contains("hidden") && elements.cacheModal.classList.contains("hidden")) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
+function closeModalById(modalId) {
+  if (modalId === "workflowModal") {
+    closeModal(elements.workflowModal);
+    return;
+  }
+  if (modalId === "cacheModal") {
+    closeModal(elements.cacheModal);
+  }
 }
 
 function updateAutoMetrics(latencyMs, ranDetection = false) {
