@@ -29,6 +29,7 @@ const elements = {
   enrollCase: document.getElementById("enrollCase"),
   autoThresholdInput: document.getElementById("autoThresholdInput"),
   autoIntervalInput: document.getElementById("autoIntervalInput"),
+  autoConfirmInput: document.getElementById("autoConfirmInput"),
   startAutoBtn: document.getElementById("startAutoBtn"),
   stopAutoBtn: document.getElementById("stopAutoBtn"),
   autoMetrics: document.getElementById("autoMetrics"),
@@ -55,7 +56,10 @@ const appState = {
   auto: {
     running: false,
     timerId: null,
-    intervalMs: 180,
+    intervalMs: 320,
+    confirmFrames: 3,
+    pendingPersonId: null,
+    pendingCount: 0,
     lastLatencyMs: null
   }
 };
@@ -166,7 +170,7 @@ async function captureForEnrollment() {
     throw new Error("Start camera first.");
   }
   setSourceFrom(elements.video);
-  renderFrame();
+  renderFrame([], null, { drawSource: true });
   setEnrollResult("Frame captured for enrollment.");
   setStatus("Captured current camera frame.");
 }
@@ -181,7 +185,7 @@ async function loadEnrollmentImage(event) {
   try {
     const image = await loadImageElement(imageUrl);
     setSourceFrom(image);
-    renderFrame();
+    renderFrame([], null, { drawSource: true });
     setEnrollResult(`Image loaded: ${file.name}`);
     setStatus(`Enrollment source updated from ${file.name}.`);
   } finally {
@@ -206,7 +210,7 @@ async function enrollFace() {
   if (!hasSourceFrame()) {
     if (appState.stream && elements.video.videoWidth) {
       setSourceFrom(elements.video);
-      renderFrame();
+      renderFrame([], null, { drawSource: true });
     } else {
       throw new Error("Capture a frame or upload an image first.");
     }
@@ -256,11 +260,20 @@ async function startAutoIdentification() {
     elements.autoIntervalInput.value,
     60,
     2000,
-    180
+    320
   );
+  appState.auto.confirmFrames = toNumberInRange(
+    elements.autoConfirmInput.value,
+    1,
+    10,
+    3
+  );
+  resetAutoConfirmation();
   appState.auto.running = true;
   setAutoButtons();
-  setAutoResult("Auto identification started...");
+  setAutoResult(
+    `Auto identification started (interval ${appState.auto.intervalMs}ms, confirm ${appState.auto.confirmFrames} frames).`
+  );
   setStatus("Auto identification is running.");
   void autoIdentifyTick();
 }
@@ -271,6 +284,7 @@ function stopAutoIdentification(statusText = "Auto identification stopped.") {
     appState.auto.timerId = null;
   }
   appState.auto.running = false;
+  resetAutoConfirmation();
   setAutoButtons();
   if (statusText) {
     setStatus(statusText);
@@ -291,7 +305,7 @@ async function autoIdentifyTick() {
       throw new Error("Cache is empty. Add at least one person.");
     }
 
-    setSourceFrom(elements.video);
+    setSourceFrom(elements.video, { maxSide: 640 });
     const baseThreshold = toNumberInRange(
       elements.autoThresholdInput.value,
       0.1,
@@ -300,16 +314,33 @@ async function autoIdentifyTick() {
     );
     const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
     const minGap = appState.peopleCache.length > 1 ? 0.03 : 0;
-    const { embedding } = await detectAndEmbed();
+    const { embedding } = await detectAndEmbed({ overlayOnly: true });
     const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
 
     if (best.matched) {
+      const candidateId = best.person.personId;
+      if (appState.auto.pendingPersonId === candidateId) {
+        appState.auto.pendingCount += 1;
+      } else {
+        appState.auto.pendingPersonId = candidateId;
+        appState.auto.pendingCount = 1;
+      }
+
       const title = formatPerson(best.person);
-      setAutoResult(
-        `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}`,
-        "ok"
-      );
+      const confirmProgress = `${appState.auto.pendingCount}/${appState.auto.confirmFrames}`;
+      if (appState.auto.pendingCount >= appState.auto.confirmFrames) {
+        setAutoResult(
+          `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)} | confirmed ${confirmProgress}`,
+          "ok"
+        );
+      } else {
+        setAutoResult(
+          `Candidate: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)} | confirming ${confirmProgress}`,
+          "warn"
+        );
+      }
     } else if (best.person) {
+      resetAutoConfirmation();
       const title = formatPerson(best.person);
       const gapText = best.gap == null ? "n/a" : best.gap.toFixed(4);
       setAutoResult(
@@ -317,9 +348,11 @@ async function autoIdentifyTick() {
         "warn"
       );
     } else {
+      resetAutoConfirmation();
       setAutoResult("No match found.", "warn");
     }
   } catch (error) {
+    resetAutoConfirmation();
     const message = error?.message || "Auto identification failed.";
     setAutoResult(`Auto identification failed: ${message}`, "warn");
     setStatus(message);
@@ -341,20 +374,22 @@ async function autoIdentifyTick() {
     return;
   }
 
-  const waitMs = Math.max(0, appState.auto.intervalMs - latency);
+  // Fixed gap between checks keeps camera preview smooth and avoids CPU spikes.
+  const waitMs = appState.auto.intervalMs;
   appState.auto.timerId = window.setTimeout(() => {
     void autoIdentifyTick();
   }, waitMs);
 }
 
-async function detectAndEmbed() {
+async function detectAndEmbed(options = {}) {
+  const overlayOnly = options.overlayOnly ?? false;
   const faces = await detectFaces(appState.detectorSession, appState.sourceCanvas, {
     scoreThreshold: 0.7,
     iouThreshold: 0.3,
     maxResults: 5
   });
   const primaryFace = getPrimaryFace(faces);
-  renderFrame(faces, primaryFace);
+  renderFrame(faces, primaryFace, { drawSource: !overlayOnly });
 
   if (!primaryFace) {
     throw new Error("No face detected in current frame.");
@@ -386,9 +421,9 @@ async function ensureModels() {
   setStatus("Models loaded.");
 }
 
-function setSourceFrom(mediaElement) {
+function setSourceFrom(mediaElement, options = {}) {
   const size = getMediaSize(mediaElement);
-  const maxSide = 960;
+  const maxSide = options.maxSide ?? 960;
   const scale = Math.min(1, maxSide / Math.max(size.width, size.height));
   const width = Math.max(1, Math.round(size.width * scale));
   const height = Math.max(1, Math.round(size.height * scale));
@@ -402,17 +437,20 @@ function setSourceFrom(mediaElement) {
   appState.sourceCtx.drawImage(mediaElement, 0, 0, width, height);
 }
 
-function renderFrame(faces = [], primaryFace = null) {
+function renderFrame(faces = [], primaryFace = null, options = {}) {
   if (!hasSourceFrame()) {
     return;
   }
+  const drawSource = options.drawSource ?? false;
 
   const canvas = elements.frameCanvas;
   const ctx = canvas.getContext("2d");
   canvas.width = appState.sourceCanvas.width;
   canvas.height = appState.sourceCanvas.height;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(appState.sourceCanvas, 0, 0);
+  if (drawSource) {
+    ctx.drawImage(appState.sourceCanvas, 0, 0);
+  }
 
   for (const face of faces) {
     const isPrimary = primaryFace && face === primaryFace;
@@ -522,8 +560,15 @@ function updateAutoMetrics(latencyMs) {
     return;
   }
 
-  const fps = latencyMs > 0 ? (1000 / latencyMs).toFixed(2) : "-";
-  elements.autoMetrics.textContent = `Latency: ${latencyMs.toFixed(0)} ms | Effective FPS: ${fps}`;
+  const inferenceFps = latencyMs > 0 ? (1000 / latencyMs).toFixed(2) : "-";
+  const checksPerSecond = (1000 / (latencyMs + appState.auto.intervalMs)).toFixed(2);
+  elements.autoMetrics.textContent =
+    `Latency: ${latencyMs.toFixed(0)} ms | Inference FPS: ${inferenceFps} | Checks/s: ${checksPerSecond}`;
+}
+
+function resetAutoConfirmation() {
+  appState.auto.pendingPersonId = null;
+  appState.auto.pendingCount = 0;
 }
 
 function formatPerson(person) {

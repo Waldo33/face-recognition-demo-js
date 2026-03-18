@@ -40,7 +40,7 @@
         <section id="autoCase" class="case active">
           <h2>Automatic Recognition</h2>
           <p class="muted">
-            Periodic detection from live camera with the highest possible cadence.
+            Periodic recognition from live camera without checking every frame.
           </p>
           <div class="form-grid auto-grid">
             <label>
@@ -62,7 +62,18 @@
                 min="60"
                 max="2000"
                 step="10"
-                value="180"
+                value="320"
+              />
+            </label>
+            <label>
+              Confirm Frames
+              <input
+                id="autoConfirmInput"
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                value="3"
               />
             </label>
           </div>
