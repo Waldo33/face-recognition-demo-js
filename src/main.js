@@ -82,6 +82,7 @@ appState.sourceCtx = appState.sourceCanvas.getContext("2d");
 
 async function init() {
   bindEvents();
+  void registerServiceWorker();
   await refreshPeopleCache();
   await renderPeopleList();
   switchCase("auto");
@@ -746,6 +747,36 @@ function closeModalById(modalId) {
   }
   if (modalId === "cacheModal") {
     closeModal(elements.cacheModal);
+  }
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  try {
+    const swUrl = new URL("../service-worker.js", import.meta.url);
+    const registration = await navigator.serviceWorker.register(swUrl);
+
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
+
+    registration.addEventListener("updatefound", () => {
+      const installingWorker = registration.installing;
+      if (!installingWorker) {
+        return;
+      }
+      installingWorker.addEventListener("statechange", () => {
+        if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+          installingWorker.postMessage({ type: "SKIP_WAITING" });
+        }
+      });
+    });
+  } catch (error) {
+    const message = error?.message || "Не удалось зарегистрировать Service Worker.";
+    setStatus(`${message} Работа продолжится онлайн.`);
   }
 }
 

@@ -57,5 +57,6 @@ npm run dev
 ## Notes
 
 - Data is stored only in browser `IndexedDB` on current device.
+- Service Worker caches app resources and ONNX models for offline reuse after first successful online load.
 - This is a demo and uses face crop without landmark alignment.
 - For production usage, use stronger liveness checks, encrypted storage, and legal/privacy controls.
