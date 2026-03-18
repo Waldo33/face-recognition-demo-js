@@ -70,6 +70,28 @@ h2 {
   font-size: 0.88rem;
 }
 
+.links-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.links-bar a {
+  color: #0b4fd6;
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid #c7d7fb;
+  background: #eef3ff;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+
+.links-bar a:hover {
+  text-decoration: underline;
+}
+
 .viewer-card {
   grid-column: 1;
   grid-row: 1;
