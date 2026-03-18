@@ -46,6 +46,20 @@ npm run dev
 
 4. Open local URL shown by Vite.
 
+## Build and Deploy to GitHub Pages
+
+1. Push project to GitHub repository (branch `main`).
+2. In repository settings open `Settings -> Pages`.
+3. Set `Build and deployment -> Source` to `GitHub Actions`.
+4. Workflow `.github/workflows/deploy-pages.yml` will build Vite project and deploy `dist` automatically on each push to `main`.
+5. Final URL format:
+   `https://<your-user>.github.io/<repo-name>/`
+
+Notes:
+
+- `vite.config.js` sets correct `base` automatically in GitHub Actions (`/<repo-name>/`), and uses `/` locally.
+- ONNX models must be present in `public/models` before build.
+
 ## Usage
 
 1. Case `Automatic Recognition`:
