@@ -31,23 +31,75 @@ export function cosineSimilarity(a, b) {
   return dotProduct(a, b);
 }
 
-export function bestCosineMatch(queryEmbedding, records, threshold) {
-  let best = null;
+export function bestCosineMatch(queryEmbedding, records, threshold, options = {}) {
+  const minGap = options.minGap ?? 0.04;
+  const personScores = [];
 
   for (const person of records) {
-    const score = cosineSimilarity(queryEmbedding, person.embedding);
-    if (!best || score > best.score) {
-      best = { person, score };
+    const embeddings = getPersonEmbeddings(person);
+    let bestSample = null;
+
+    for (let sampleIndex = 0; sampleIndex < embeddings.length; sampleIndex += 1) {
+      let score;
+      try {
+        score = cosineSimilarity(queryEmbedding, embeddings[sampleIndex]);
+      } catch {
+        continue;
+      }
+
+      if (!bestSample || score > bestSample.score) {
+        bestSample = { score, sampleIndex };
+      }
+    }
+
+    if (bestSample) {
+      personScores.push({
+        person,
+        score: bestSample.score,
+        sampleIndex: bestSample.sampleIndex
+      });
     }
   }
 
-  if (!best) {
-    return { matched: false, score: null, person: null };
+  if (!personScores.length) {
+    return {
+      matched: false,
+      score: null,
+      person: null,
+      sampleIndex: null,
+      gap: null
+    };
   }
 
+  personScores.sort((a, b) => b.score - a.score);
+  const best = personScores[0];
+  const second = personScores[1] || null;
+  const gap = second ? best.score - second.score : null;
+  const gapOk = !second || gap >= minGap;
+
   return {
-    matched: best.score >= threshold,
+    matched: best.score >= threshold && gapOk,
     score: best.score,
-    person: best.person
+    person: best.person,
+    sampleIndex: best.sampleIndex,
+    gap
   };
+}
+
+export function getRecommendedThreshold(personCount, baseThreshold) {
+  if (personCount <= 1) {
+    return Math.min(0.75, Math.max(0.5, baseThreshold));
+  }
+
+  return baseThreshold;
+}
+
+function getPersonEmbeddings(person) {
+  if (Array.isArray(person.embeddings) && person.embeddings.length > 0) {
+    return person.embeddings;
+  }
+  if (person.embedding) {
+    return [person.embedding];
+  }
+  return [];
 }

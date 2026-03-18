@@ -11,7 +11,7 @@ Demo web app for face identification in browser:
 
 - `onnxruntime-web` for ONNX inference in browser
 - Vite + vanilla JavaScript
-- local storage in browser (`localStorage`)
+- local storage in browser (`IndexedDB`, embeddings stored as binary `ArrayBuffer`)
 
 ## Selected Models
 
@@ -48,15 +48,14 @@ npm run dev
 
 ## Usage
 
-1. Start camera or upload image.
-2. Capture a frame.
-3. Fill `Person ID`, `First Name`, `Last Name`.
-4. Click `Detect Face + Save Embedding`.
-5. For identification, click `Detect Face + Identify`.
-6. Adjust threshold if needed (default `0.52`).
+1. Case `Automatic Recognition`:
+   Start camera, set threshold and interval, click `Start Auto Identify`.
+2. Case `Add New Person`:
+   Capture camera frame or upload photo, fill metadata, click `Detect Face + Save Sample`.
+3. Repeated save with the same `Person ID` adds more face samples (up to 12) to improve matching.
 
 ## Notes
 
-- Data is stored only in browser cache on current device.
+- Data is stored only in browser `IndexedDB` on current device.
 - This is a demo and uses face crop without landmark alignment.
 - For production usage, use stronger liveness checks, encrypted storage, and legal/privacy controls.

@@ -1,5 +1,5 @@
 import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.all.min.mjs";
-import { bestCosineMatch } from "./face/math.js";
+import { bestCosineMatch, getRecommendedThreshold } from "./face/math.js";
 import { extractEmbedding, createRecognizerSession } from "./face/recognizer.js";
 import {
   clearPeopleCache,
@@ -20,20 +20,28 @@ ort.env.wasm.simd = true;
 const elements = {
   video: document.getElementById("camera"),
   frameCanvas: document.getElementById("frameCanvas"),
-  imageInput: document.getElementById("imageInput"),
+  status: document.getElementById("status"),
   startCameraBtn: document.getElementById("startCameraBtn"),
   stopCameraBtn: document.getElementById("stopCameraBtn"),
-  captureBtn: document.getElementById("captureBtn"),
-  status: document.getElementById("status"),
+  autoCaseTab: document.getElementById("autoCaseTab"),
+  enrollCaseTab: document.getElementById("enrollCaseTab"),
+  autoCase: document.getElementById("autoCase"),
+  enrollCase: document.getElementById("enrollCase"),
+  autoThresholdInput: document.getElementById("autoThresholdInput"),
+  autoIntervalInput: document.getElementById("autoIntervalInput"),
+  startAutoBtn: document.getElementById("startAutoBtn"),
+  stopAutoBtn: document.getElementById("stopAutoBtn"),
+  autoMetrics: document.getElementById("autoMetrics"),
+  autoResult: document.getElementById("autoResult"),
+  captureEnrollBtn: document.getElementById("captureEnrollBtn"),
+  enrollImageInput: document.getElementById("enrollImageInput"),
   personIdInput: document.getElementById("personIdInput"),
   firstNameInput: document.getElementById("firstNameInput"),
   lastNameInput: document.getElementById("lastNameInput"),
   enrollBtn: document.getElementById("enrollBtn"),
-  identifyBtn: document.getElementById("identifyBtn"),
-  thresholdInput: document.getElementById("thresholdInput"),
-  result: document.getElementById("result"),
-  peopleList: document.getElementById("peopleList"),
-  clearCacheBtn: document.getElementById("clearCacheBtn")
+  enrollResult: document.getElementById("enrollResult"),
+  clearCacheBtn: document.getElementById("clearCacheBtn"),
+  peopleList: document.getElementById("peopleList")
 };
 
 const appState = {
@@ -41,26 +49,43 @@ const appState = {
   detectorSession: null,
   recognizerSession: null,
   busy: false,
+  peopleCache: [],
   sourceCanvas: document.createElement("canvas"),
-  sourceCtx: null
+  sourceCtx: null,
+  auto: {
+    running: false,
+    timerId: null,
+    intervalMs: 180,
+    lastLatencyMs: null
+  }
 };
 appState.sourceCtx = appState.sourceCanvas.getContext("2d");
 
-function init() {
+async function init() {
   bindEvents();
-  renderPeopleList();
-  setStatus("Load a frame from camera or image.");
-  setResult("No identification run yet.");
+  await refreshPeopleCache();
+  await renderPeopleList();
+  switchCase("auto");
+  setAutoButtons();
+  setStatus("Start camera and pick a workflow below.");
+  setAutoResult("Auto identification is idle.");
+  setEnrollResult("No enrollment run yet.");
+  updateAutoMetrics(null);
 }
 
 function bindEvents() {
   elements.startCameraBtn.addEventListener("click", () => runSafe(startCamera));
   elements.stopCameraBtn.addEventListener("click", stopCamera);
-  elements.captureBtn.addEventListener("click", () => runSafe(captureFrame));
+  elements.autoCaseTab.addEventListener("click", () => switchCase("auto"));
+  elements.enrollCaseTab.addEventListener("click", () => switchCase("enroll"));
+  elements.startAutoBtn.addEventListener("click", () => runSafe(startAutoIdentification));
+  elements.stopAutoBtn.addEventListener("click", () => stopAutoIdentification("Auto identification stopped."));
+  elements.captureEnrollBtn.addEventListener("click", () => runSafe(captureForEnrollment));
+  elements.enrollImageInput.addEventListener("change", (event) =>
+    runSafe(() => loadEnrollmentImage(event))
+  );
   elements.enrollBtn.addEventListener("click", () => runSafe(enrollFace));
-  elements.identifyBtn.addEventListener("click", () => runSafe(identifyFace));
-  elements.clearCacheBtn.addEventListener("click", clearCache);
-  elements.imageInput.addEventListener("change", (event) => runSafe(() => loadImage(event)));
+  elements.clearCacheBtn.addEventListener("click", () => runSafe(clearCache));
 }
 
 async function runSafe(task) {
@@ -68,21 +93,37 @@ async function runSafe(task) {
     return;
   }
   appState.busy = true;
-  toggleActions(true);
+  toggleBusyControls(true);
   try {
     await task();
   } catch (error) {
-    setStatus(error.message || "Operation failed.");
+    const message = error?.message || "Operation failed.";
+    setStatus(message);
   } finally {
     appState.busy = false;
-    toggleActions(false);
+    toggleBusyControls(false);
+    setAutoButtons();
   }
 }
 
-function toggleActions(disabled) {
-  elements.captureBtn.disabled = disabled;
+function toggleBusyControls(disabled) {
+  elements.startCameraBtn.disabled = disabled;
+  elements.captureEnrollBtn.disabled = disabled;
   elements.enrollBtn.disabled = disabled;
-  elements.identifyBtn.disabled = disabled;
+  elements.clearCacheBtn.disabled = disabled;
+  elements.enrollImageInput.disabled = disabled;
+  elements.startAutoBtn.disabled = disabled || appState.auto.running;
+}
+
+function switchCase(caseName) {
+  const autoActive = caseName === "auto";
+  if (!autoActive && appState.auto.running) {
+    stopAutoIdentification("Auto identification paused for enrollment.");
+  }
+  elements.autoCase.classList.toggle("hidden", !autoActive);
+  elements.enrollCase.classList.toggle("hidden", autoActive);
+  elements.autoCaseTab.classList.toggle("active", autoActive);
+  elements.enrollCaseTab.classList.toggle("active", !autoActive);
 }
 
 async function startCamera() {
@@ -101,10 +142,12 @@ async function startCamera() {
   appState.stream = stream;
   elements.video.srcObject = stream;
   await elements.video.play();
-  setStatus("Camera started. Press Capture Frame.");
+  setStatus("Camera started.");
 }
 
 function stopCamera() {
+  stopAutoIdentification("");
+
   if (!appState.stream) {
     setStatus("Camera already stopped.");
     return;
@@ -118,16 +161,17 @@ function stopCamera() {
   setStatus("Camera stopped.");
 }
 
-function captureFrame() {
+async function captureForEnrollment() {
   if (!appState.stream || !elements.video.videoWidth) {
-    throw new Error("Start the camera first.");
+    throw new Error("Start camera first.");
   }
   setSourceFrom(elements.video);
   renderFrame();
-  setStatus("Frame captured.");
+  setEnrollResult("Frame captured for enrollment.");
+  setStatus("Captured current camera frame.");
 }
 
-async function loadImage(event) {
+async function loadEnrollmentImage(event) {
   const file = event.target.files?.[0];
   if (!file) {
     return;
@@ -138,14 +182,19 @@ async function loadImage(event) {
     const image = await loadImageElement(imageUrl);
     setSourceFrom(image);
     renderFrame();
-    setStatus(`Image loaded: ${file.name}`);
+    setEnrollResult(`Image loaded: ${file.name}`);
+    setStatus(`Enrollment source updated from ${file.name}.`);
   } finally {
     URL.revokeObjectURL(imageUrl);
-    elements.imageInput.value = "";
+    elements.enrollImageInput.value = "";
   }
 }
 
 async function enrollFace() {
+  if (appState.auto.running) {
+    stopAutoIdentification("Auto identification paused for enrollment.");
+  }
+
   const personId = elements.personIdInput.value.trim();
   const firstName = elements.firstNameInput.value.trim();
   const lastName = elements.lastNameInput.value.trim();
@@ -153,50 +202,149 @@ async function enrollFace() {
   if (!personId) {
     throw new Error("Person ID is required.");
   }
+
   if (!hasSourceFrame()) {
-    throw new Error("Capture a frame or upload an image first.");
+    if (appState.stream && elements.video.videoWidth) {
+      setSourceFrom(elements.video);
+      renderFrame();
+    } else {
+      throw new Error("Capture a frame or upload an image first.");
+    }
   }
 
   await ensureModels();
   setStatus("Detecting face and creating embedding...");
+  setEnrollResult("Processing enrollment...");
 
   const { embedding } = await detectAndEmbed();
-  upsertPerson({ personId, firstName, lastName, embedding });
-  renderPeopleList();
-  setStatus(`Saved embedding for "${personId}" in local cache.`);
+  const person = await upsertPerson({
+    personId,
+    firstName,
+    lastName,
+    embedding,
+    appendSample: true
+  });
+  await refreshPeopleCache();
+  await renderPeopleList();
+  setEnrollResult(
+    `Saved sample ${person.sampleCount} for "${personId}".`,
+    "ok"
+  );
+  setStatus(
+    `Saved sample ${person.sampleCount} for "${personId}" in IndexedDB.`
+  );
 }
 
-async function identifyFace() {
-  if (!hasSourceFrame()) {
-    throw new Error("Capture a frame or upload an image first.");
+async function startAutoIdentification() {
+  if (appState.auto.running) {
+    setStatus("Auto identification is already running.");
+    return;
   }
-  const people = listPeople();
-  if (!people.length) {
-    throw new Error("Local cache is empty. Enroll at least one person.");
+
+  if (!appState.stream || !elements.video.videoWidth) {
+    throw new Error("Start camera first.");
+  }
+
+  await refreshPeopleCache();
+  if (!appState.peopleCache.length) {
+    throw new Error("Cache is empty. Add at least one person first.");
   }
 
   await ensureModels();
-  setStatus("Detecting face and running identification...");
 
-  const threshold = toNumberInRange(elements.thresholdInput.value, 0.1, 0.99, 0.52);
-  const { embedding } = await detectAndEmbed();
-  const best = bestCosineMatch(embedding, people, threshold);
+  appState.auto.intervalMs = toNumberInRange(
+    elements.autoIntervalInput.value,
+    60,
+    2000,
+    180
+  );
+  appState.auto.running = true;
+  setAutoButtons();
+  setAutoResult("Auto identification started...");
+  setStatus("Auto identification is running.");
+  void autoIdentifyTick();
+}
 
-  if (best.matched) {
-    const title = formatPerson(best.person);
-    setResult(
-      `Matched: ${title} (id: ${best.person.personId}), score=${best.score.toFixed(4)}`,
-      "ok"
-    );
-  } else if (best.person) {
-    const title = formatPerson(best.person);
-    setResult(
-      `No exact match (threshold=${threshold}). Closest: ${title}, score=${best.score.toFixed(4)}`,
-      "warn"
-    );
-  } else {
-    setResult("No match found.", "warn");
+function stopAutoIdentification(statusText = "Auto identification stopped.") {
+  if (appState.auto.timerId) {
+    window.clearTimeout(appState.auto.timerId);
+    appState.auto.timerId = null;
   }
+  appState.auto.running = false;
+  setAutoButtons();
+  if (statusText) {
+    setStatus(statusText);
+  }
+}
+
+async function autoIdentifyTick() {
+  if (!appState.auto.running) {
+    return;
+  }
+
+  const startedAt = performance.now();
+  try {
+    if (!appState.stream || !elements.video.videoWidth) {
+      throw new Error("Camera is not available.");
+    }
+    if (!appState.peopleCache.length) {
+      throw new Error("Cache is empty. Add at least one person.");
+    }
+
+    setSourceFrom(elements.video);
+    const baseThreshold = toNumberInRange(
+      elements.autoThresholdInput.value,
+      0.1,
+      0.99,
+      0.55
+    );
+    const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
+    const minGap = appState.peopleCache.length > 1 ? 0.03 : 0;
+    const { embedding } = await detectAndEmbed();
+    const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
+
+    if (best.matched) {
+      const title = formatPerson(best.person);
+      setAutoResult(
+        `Matched: ${title} (id: ${best.person.personId}, sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}`,
+        "ok"
+      );
+    } else if (best.person) {
+      const title = formatPerson(best.person);
+      const gapText = best.gap == null ? "n/a" : best.gap.toFixed(4);
+      setAutoResult(
+        `No exact match (threshold=${threshold.toFixed(2)}, gap>=${minGap.toFixed(2)}). Closest: ${title} (sample ${best.sampleIndex + 1}/${best.person.sampleCount}), score=${best.score.toFixed(4)}, gap=${gapText}`,
+        "warn"
+      );
+    } else {
+      setAutoResult("No match found.", "warn");
+    }
+  } catch (error) {
+    const message = error?.message || "Auto identification failed.";
+    setAutoResult(`Auto identification failed: ${message}`, "warn");
+    setStatus(message);
+
+    if (
+      message.includes("Camera is not available") ||
+      message.includes("Cache is empty")
+    ) {
+      stopAutoIdentification("Auto identification stopped.");
+      return;
+    }
+  }
+
+  const latency = performance.now() - startedAt;
+  appState.auto.lastLatencyMs = latency;
+  updateAutoMetrics(latency);
+
+  if (!appState.auto.running) {
+    return;
+  }
+
+  const waitMs = Math.max(0, appState.auto.intervalMs - latency);
+  appState.auto.timerId = window.setTimeout(() => {
+    void autoIdentifyTick();
+  }, waitMs);
 }
 
 async function detectAndEmbed() {
@@ -218,7 +366,8 @@ async function detectAndEmbed() {
     primaryFace,
     { padding: 0.3 }
   );
-  return { faces, primaryFace, embedding };
+
+  return { embedding };
 }
 
 async function ensureModels() {
@@ -239,13 +388,16 @@ async function ensureModels() {
 
 function setSourceFrom(mediaElement) {
   const size = getMediaSize(mediaElement);
-  const maxSide = 1280;
+  const maxSide = 960;
   const scale = Math.min(1, maxSide / Math.max(size.width, size.height));
   const width = Math.max(1, Math.round(size.width * scale));
   const height = Math.max(1, Math.round(size.height * scale));
 
-  appState.sourceCanvas.width = width;
-  appState.sourceCanvas.height = height;
+  if (appState.sourceCanvas.width !== width || appState.sourceCanvas.height !== height) {
+    appState.sourceCanvas.width = width;
+    appState.sourceCanvas.height = height;
+  }
+
   appState.sourceCtx.clearRect(0, 0, width, height);
   appState.sourceCtx.drawImage(mediaElement, 0, 0, width, height);
 }
@@ -254,6 +406,7 @@ function renderFrame(faces = [], primaryFace = null) {
   if (!hasSourceFrame()) {
     return;
   }
+
   const canvas = elements.frameCanvas;
   const ctx = canvas.getContext("2d");
   canvas.width = appState.sourceCanvas.width;
@@ -280,11 +433,15 @@ function hasSourceFrame() {
   return appState.sourceCanvas.width > 0 && appState.sourceCanvas.height > 0;
 }
 
-function renderPeopleList() {
-  const people = listPeople();
+async function refreshPeopleCache() {
+  appState.peopleCache = await listPeople();
+}
+
+async function renderPeopleList() {
+  const people = appState.peopleCache;
   if (!people.length) {
     elements.peopleList.innerHTML =
-      "<p class='muted'>No embeddings in cache. Enroll a person to begin.</p>";
+      "<p class='muted'>No embeddings in cache. Add a person to begin.</p>";
     return;
   }
 
@@ -300,17 +457,23 @@ function renderPeopleList() {
 
     const subtitle = document.createElement("div");
     subtitle.className = "person-subtitle";
-    subtitle.textContent = `Updated: ${new Date(person.updatedAt).toLocaleString()}`;
+    subtitle.textContent = `Samples: ${person.sampleCount} | Updated: ${new Date(person.updatedAt).toLocaleString()}`;
     info.appendChild(title);
     info.appendChild(subtitle);
 
     const removeButton = document.createElement("button");
     removeButton.textContent = "Delete";
-    removeButton.addEventListener("click", () => {
-      removePerson(person.personId);
-      renderPeopleList();
-      setStatus(`Deleted ${person.personId} from local cache.`);
-    });
+    removeButton.addEventListener("click", () =>
+      runSafe(async () => {
+        await removePerson(person.personId);
+        await refreshPeopleCache();
+        await renderPeopleList();
+        if (!appState.peopleCache.length) {
+          stopAutoIdentification("Auto identification stopped: cache became empty.");
+        }
+        setStatus(`Deleted ${person.personId} from cache.`);
+      })
+    );
 
     row.appendChild(info);
     row.appendChild(removeButton);
@@ -318,23 +481,49 @@ function renderPeopleList() {
   }
 }
 
-function clearCache() {
-  clearPeopleCache();
-  renderPeopleList();
-  setResult("No identification run yet.");
-  setStatus("Local cache cleared.");
+async function clearCache() {
+  await clearPeopleCache();
+  await refreshPeopleCache();
+  await renderPeopleList();
+  stopAutoIdentification("Auto identification stopped: cache cleared.");
+  setAutoResult("Auto identification is idle.");
+  setEnrollResult("No enrollment run yet.");
+  setStatus("Cache cleared.");
 }
 
 function setStatus(text) {
   elements.status.textContent = text;
 }
 
-function setResult(text, kind = "") {
-  elements.result.classList.remove("ok", "warn");
+function setAutoResult(text, kind = "") {
+  setMessage(elements.autoResult, text, kind);
+}
+
+function setEnrollResult(text, kind = "") {
+  setMessage(elements.enrollResult, text, kind);
+}
+
+function setMessage(element, text, kind = "") {
+  element.classList.remove("ok", "warn");
   if (kind) {
-    elements.result.classList.add(kind);
+    element.classList.add(kind);
   }
-  elements.result.textContent = text;
+  element.textContent = text;
+}
+
+function setAutoButtons() {
+  elements.startAutoBtn.disabled = appState.auto.running || appState.busy;
+  elements.stopAutoBtn.disabled = !appState.auto.running;
+}
+
+function updateAutoMetrics(latencyMs) {
+  if (latencyMs == null) {
+    elements.autoMetrics.textContent = "Latency: - ms | Effective FPS: -";
+    return;
+  }
+
+  const fps = latencyMs > 0 ? (1000 / latencyMs).toFixed(2) : "-";
+  elements.autoMetrics.textContent = `Latency: ${latencyMs.toFixed(0)} ms | Effective FPS: ${fps}`;
 }
 
 function formatPerson(person) {
@@ -369,4 +558,6 @@ function loadImageElement(url) {
   });
 }
 
-init();
+init().catch((error) => {
+  setStatus(error.message || "Initialization failed.");
+});

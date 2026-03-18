@@ -5,6 +5,8 @@ const CROP_SIZE = 112;
 
 const cropCanvas = document.createElement("canvas");
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
+const tensorCanvas = document.createElement("canvas");
+const tensorCtx = tensorCanvas.getContext("2d", { willReadFrequently: true });
 
 export function createRecognizerSession(modelUrl) {
   return ort.InferenceSession.create(modelUrl, {
@@ -18,11 +20,14 @@ export async function extractEmbedding(session, source, faceBox, options = {}) {
   const croppedFace = cropFace(source, faceBox, padding);
   const tensor = faceToTensor(session, croppedFace);
   const outputMap = await session.run({ [session.inputNames[0]]: tensor });
-  const outputTensor = Object.values(outputMap)[0];
+  const outputTensor = pickEmbeddingTensor(outputMap);
   if (!outputTensor) {
     throw new Error("Recognizer output tensor is empty.");
   }
-  return l2Normalize(outputTensor.data);
+
+  const embedding = l2Normalize(outputTensor.data);
+  validateEmbedding(embedding);
+  return embedding;
 }
 
 function cropFace(source, faceBox, padding) {
@@ -47,9 +52,13 @@ function faceToTensor(session, source) {
   const dims = session.inputMetadata?.[session.inputNames[0]]?.dimensions;
   const isNhwc = Array.isArray(dims) && dims[3] === 3;
 
-  cropCtx.clearRect(0, 0, CROP_SIZE, CROP_SIZE);
-  cropCtx.drawImage(source, 0, 0, CROP_SIZE, CROP_SIZE);
-  const { data } = cropCtx.getImageData(0, 0, CROP_SIZE, CROP_SIZE);
+  // Use a separate canvas for tensor prep. If source===cropCanvas, clearing the same
+  // canvas before draw would erase the cropped face and produce near-constant embeddings.
+  tensorCanvas.width = CROP_SIZE;
+  tensorCanvas.height = CROP_SIZE;
+  tensorCtx.clearRect(0, 0, CROP_SIZE, CROP_SIZE);
+  tensorCtx.drawImage(source, 0, 0, CROP_SIZE, CROP_SIZE);
+  const { data } = tensorCtx.getImageData(0, 0, CROP_SIZE, CROP_SIZE);
   const area = CROP_SIZE * CROP_SIZE;
 
   if (isNhwc) {
@@ -86,4 +95,47 @@ function getSourceSize(source) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function pickEmbeddingTensor(outputMap) {
+  const tensors = Object.values(outputMap);
+  if (!tensors.length) {
+    return null;
+  }
+
+  // Take the most likely embedding output: largest vector-like tensor.
+  let best = null;
+  for (const tensor of tensors) {
+    const size = tensor?.data?.length || 0;
+    if (!size) {
+      continue;
+    }
+    if (!best || size > best.data.length) {
+      best = tensor;
+    }
+  }
+
+  if (!best || best.data.length < 64) {
+    return null;
+  }
+  return best;
+}
+
+function validateEmbedding(embedding) {
+  if (!embedding || embedding.length < 64) {
+    throw new Error("Recognizer returned invalid embedding length.");
+  }
+
+  // Detect degenerate outputs where all values are almost equal.
+  const mean = embedding.reduce((sum, value) => sum + value, 0) / embedding.length;
+  let variance = 0;
+  for (let i = 0; i < embedding.length; i += 1) {
+    const diff = embedding[i] - mean;
+    variance += diff * diff;
+  }
+  variance /= embedding.length;
+
+  if (variance < 1e-6) {
+    throw new Error("Recognizer produced degenerate embedding.");
+  }
 }
