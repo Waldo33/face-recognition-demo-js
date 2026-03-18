@@ -58,6 +58,9 @@ const appState = {
     timerId: null,
     intervalMs: 320,
     confirmFrames: 3,
+    detectEveryCycles: 3,
+    tickIndex: 0,
+    lastPrimaryFace: null,
     pendingPersonId: null,
     pendingCount: 0,
     lastLatencyMs: null
@@ -268,6 +271,7 @@ async function startAutoIdentification() {
     10,
     3
   );
+  resetAutoTracking();
   resetAutoConfirmation();
   appState.auto.running = true;
   setAutoButtons();
@@ -284,6 +288,7 @@ function stopAutoIdentification(statusText = "Auto identification stopped.") {
     appState.auto.timerId = null;
   }
   appState.auto.running = false;
+  resetAutoTracking();
   resetAutoConfirmation();
   setAutoButtons();
   if (statusText) {
@@ -314,7 +319,16 @@ async function autoIdentifyTick() {
     );
     const threshold = getRecommendedThreshold(appState.peopleCache.length, baseThreshold);
     const minGap = appState.peopleCache.length > 1 ? 0.03 : 0;
-    const { embedding } = await detectAndEmbed({ overlayOnly: true });
+    const runDetection =
+      appState.auto.tickIndex % appState.auto.detectEveryCycles === 0 ||
+      !appState.auto.lastPrimaryFace;
+    const { embedding, primaryFace } = await detectAndEmbed({
+      overlayOnly: true,
+      runDetection,
+      reuseFaceBox: appState.auto.lastPrimaryFace
+    });
+    appState.auto.lastPrimaryFace = primaryFace ? cloneFaceBox(primaryFace) : null;
+    appState.auto.tickIndex += 1;
     const best = bestCosineMatch(embedding, appState.peopleCache, threshold, { minGap });
 
     if (best.matched) {
@@ -352,6 +366,7 @@ async function autoIdentifyTick() {
       setAutoResult("No match found.", "warn");
     }
   } catch (error) {
+    resetAutoTracking();
     resetAutoConfirmation();
     const message = error?.message || "Auto identification failed.";
     setAutoResult(`Auto identification failed: ${message}`, "warn");
@@ -383,12 +398,24 @@ async function autoIdentifyTick() {
 
 async function detectAndEmbed(options = {}) {
   const overlayOnly = options.overlayOnly ?? false;
-  const faces = await detectFaces(appState.detectorSession, appState.sourceCanvas, {
-    scoreThreshold: 0.7,
-    iouThreshold: 0.3,
-    maxResults: 5
-  });
-  const primaryFace = getPrimaryFace(faces);
+  const runDetection = options.runDetection ?? true;
+  const reuseFaceBox = options.reuseFaceBox ?? null;
+
+  let faces = [];
+  let primaryFace = null;
+
+  if (runDetection) {
+    faces = await detectFaces(appState.detectorSession, appState.sourceCanvas, {
+      scoreThreshold: 0.7,
+      iouThreshold: 0.3,
+      maxResults: 5
+    });
+    primaryFace = getPrimaryFace(faces);
+  } else if (reuseFaceBox) {
+    primaryFace = clampFaceBoxToSource(reuseFaceBox);
+    faces = primaryFace ? [primaryFace] : [];
+  }
+
   renderFrame(faces, primaryFace, { drawSource: !overlayOnly });
 
   if (!primaryFace) {
@@ -402,7 +429,7 @@ async function detectAndEmbed(options = {}) {
     { padding: 0.3 }
   );
 
-  return { embedding };
+  return { embedding, primaryFace };
 }
 
 async function ensureModels() {
@@ -459,8 +486,9 @@ function renderFrame(faces = [], primaryFace = null, options = {}) {
     ctx.strokeRect(face.x, face.y, face.width, face.height);
     ctx.fillStyle = isPrimary ? "#00b873" : "#0f62fe";
     ctx.font = "14px sans-serif";
+    const scoreText = Number.isFinite(face.score) ? face.score.toFixed(2) : "--";
     ctx.fillText(
-      `${isPrimary ? "Primary" : "Face"} ${face.score.toFixed(2)}`,
+      `${isPrimary ? "Primary" : "Face"} ${scoreText}`,
       face.x + 4,
       Math.max(16, face.y - 6)
     );
@@ -556,7 +584,7 @@ function setAutoButtons() {
 
 function updateAutoMetrics(latencyMs) {
   if (latencyMs == null) {
-    elements.autoMetrics.textContent = "Latency: - ms | Effective FPS: -";
+    elements.autoMetrics.textContent = "Latency: - ms | Inference FPS: - | Checks/s: -";
     return;
   }
 
@@ -569,6 +597,43 @@ function updateAutoMetrics(latencyMs) {
 function resetAutoConfirmation() {
   appState.auto.pendingPersonId = null;
   appState.auto.pendingCount = 0;
+}
+
+function resetAutoTracking() {
+  appState.auto.tickIndex = 0;
+  appState.auto.lastPrimaryFace = null;
+}
+
+function cloneFaceBox(face) {
+  return {
+    x: face.x,
+    y: face.y,
+    width: face.width,
+    height: face.height,
+    score: face.score
+  };
+}
+
+function clampFaceBoxToSource(face) {
+  const width = appState.sourceCanvas.width;
+  const height = appState.sourceCanvas.height;
+  if (!width || !height) {
+    return null;
+  }
+
+  const x = clamp(face.x, 0, width - 1);
+  const y = clamp(face.y, 0, height - 1);
+  const w = clamp(face.width, 1, width - x);
+  const h = clamp(face.height, 1, height - y);
+  if (w < 4 || h < 4) {
+    return null;
+  }
+
+  return { x, y, width: w, height: h, score: face.score };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function formatPerson(person) {
