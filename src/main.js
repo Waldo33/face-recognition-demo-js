@@ -117,17 +117,8 @@ async function resolveModelPaths() {
 
 async function urlExists(url) {
   try {
-    const head = await fetch(url, { method: "HEAD", cache: "no-store" });
-    if (head.ok) {
-      return true;
-    }
-  } catch {
-    // Fallback to GET when HEAD is not supported.
-  }
-
-  try {
-    const get = await fetch(url, { method: "GET", cache: "no-store" });
-    return get.ok;
+    const response = await fetch(url, { method: "HEAD", cache: "no-store" });
+    return response.ok;
   } catch {
     return false;
   }
