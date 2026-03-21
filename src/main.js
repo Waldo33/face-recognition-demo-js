@@ -10,11 +10,9 @@ import {
 import { createDetectorSession, detectFaces, getPrimaryFace } from "./face/ultraface.js";
 
 const MODEL_PATHS = {
-  detector: "",
-  recognizer: ""
+  detector: new URL("./models/version-RFB-320.onnx", window.location.href).toString(),
+  recognizer: new URL("./models/w600k_mbf.onnx", window.location.href).toString()
 };
-
-const MODEL_CANDIDATE_BASES = ["./models/", "./public/models/"];
 const ORT_CDN_ASSETS = [
   "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.all.min.mjs",
   "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm",
@@ -33,6 +31,7 @@ ort.env.wasm.simd = true;
 
 const elements = {
   video: document.getElementById("camera"),
+  viewer: document.querySelector(".viewer"),
   frameCanvas: document.getElementById("frameCanvas"),
   status: document.getElementById("status"),
   toggleRecognitionBtn: document.getElementById("toggleRecognitionBtn"),
@@ -78,6 +77,7 @@ const appState = {
   sourceCtx: null,
   auto: {
     running: false,
+    runId: 0,
     useWorker: false,
     timerId: null,
     intervalMs: 320,
@@ -94,9 +94,8 @@ appState.sourceCtx = appState.sourceCanvas.getContext("2d");
 
 async function init() {
   bindEvents();
-  await resolveModelPaths();
   await registerServiceWorker();
-  void warmupOfflineAssets();
+  scheduleOfflineWarmup();
   await refreshPeopleCache();
   await renderPeopleList();
   setAutoButtons();
@@ -105,34 +104,6 @@ async function init() {
   setAutoResult("Автораспознавание не запущено.");
   setEnrollResult("Добавление ещё не запускалось.");
   updateAutoMetrics(null);
-}
-
-async function resolveModelPaths() {
-  for (const base of MODEL_CANDIDATE_BASES) {
-    const detectorUrl = new URL(`./${base.replace(/^\.\//, "")}version-RFB-320.onnx`, window.location.href).toString();
-    const recognizerUrl = new URL(`./${base.replace(/^\.\//, "")}w600k_mbf.onnx`, window.location.href).toString();
-
-    // HEAD can be blocked on some static hosts, so we fallback to GET if needed.
-    const detectorOk = await urlExists(detectorUrl);
-    const recognizerOk = await urlExists(recognizerUrl);
-    if (detectorOk && recognizerOk) {
-      MODEL_PATHS.detector = detectorUrl;
-      MODEL_PATHS.recognizer = recognizerUrl;
-      return;
-    }
-  }
-
-  MODEL_PATHS.detector = new URL("./models/version-RFB-320.onnx", window.location.href).toString();
-  MODEL_PATHS.recognizer = new URL("./models/w600k_mbf.onnx", window.location.href).toString();
-}
-
-async function urlExists(url) {
-  try {
-    const response = await fetch(url, { method: "HEAD", cache: "no-store" });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 function bindEvents() {
@@ -383,6 +354,7 @@ async function startAutoIdentification() {
   closeModal(elements.enrollModal);
   resetAutoTracking();
   resetAutoConfirmation();
+  appState.auto.runId += 1;
   appState.auto.running = true;
   setAutoButtons();
   setAutoResult("Распознавание запущено.");
@@ -391,7 +363,7 @@ async function startAutoIdentification() {
       ? "Автораспознавание выполняется в воркере."
       : "Автораспознавание запущено."
   );
-  void autoIdentifyTick();
+  void autoIdentifyTick(appState.auto.runId);
 }
 
 function stopAutoIdentification(statusText = "Автораспознавание остановлено.") {
@@ -399,20 +371,21 @@ function stopAutoIdentification(statusText = "Автораспознавание
     window.clearTimeout(appState.auto.timerId);
     appState.auto.timerId = null;
   }
-  if (appState.worker.ready) {
-    void workerCall("resetTracking", {}).catch(() => {});
-  }
+  appState.auto.runId += 1;
   appState.auto.running = false;
+  appState.auto.useWorker = false;
   resetAutoTracking();
   resetAutoConfirmation();
+  teardownAutoWorker();
+  clearFrameOverlay();
   setAutoButtons();
   if (statusText) {
     setStatus(statusText);
   }
 }
 
-async function autoIdentifyTick() {
-  if (!appState.auto.running) {
+async function autoIdentifyTick(runId) {
+  if (!appState.auto.running || runId !== appState.auto.runId) {
     return;
   }
 
@@ -482,6 +455,9 @@ async function autoIdentifyTick() {
       renderFrame(faces, primaryFace, { drawSource: false, best });
     }
   } catch (error) {
+    if (runId !== appState.auto.runId) {
+      return;
+    }
     resetAutoTracking();
     resetAutoConfirmation();
     const message = error?.message || "Ошибка автораспознавания.";
@@ -514,14 +490,14 @@ async function autoIdentifyTick() {
   appState.auto.lastLatencyMs = finalLatencyMs;
   updateAutoMetrics(finalLatencyMs, runDetectionThisTick);
 
-  if (!appState.auto.running) {
+  if (!appState.auto.running || runId !== appState.auto.runId) {
     return;
   }
 
   // Fixed gap between checks keeps camera preview smooth and avoids CPU spikes.
   const waitMs = appState.auto.intervalMs;
   appState.auto.timerId = window.setTimeout(() => {
-    void autoIdentifyTick();
+    void autoIdentifyTick(runId);
   }, waitMs);
 }
 
@@ -599,7 +575,7 @@ async function detectAndEmbed(options = {}) {
     { padding: 0.3 }
   );
 
-  return { embedding, primaryFace };
+  return { embedding, primaryFace, faces };
 }
 
 async function ensureModels() {
@@ -640,35 +616,53 @@ function renderFrame(faces = [], primaryFace = null, options = {}) {
   }
   const drawSource = options.drawSource ?? false;
   const best = options.best ?? null;
-
-  const canvas = elements.frameCanvas;
-  const ctx = canvas.getContext("2d");
-  canvas.width = appState.sourceCanvas.width;
-  canvas.height = appState.sourceCanvas.height;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (drawSource) {
-    ctx.drawImage(appState.sourceCanvas, 0, 0);
+  const sourceWidth = appState.sourceCanvas.width;
+  const sourceHeight = appState.sourceCanvas.height;
+  const overlay = prepareOverlayCanvas();
+  if (!overlay) {
+    return;
   }
-  drawFaceBoxes(ctx, faces, primaryFace, best);
+
+  const { ctx, width, height } = overlay;
+  ctx.clearRect(0, 0, width, height);
+  if (drawSource) {
+    ctx.drawImage(appState.sourceCanvas, 0, 0, width, height);
+  }
+  drawFaceBoxes(ctx, faces, primaryFace, best, {
+    sourceWidth,
+    sourceHeight,
+    canvasWidth: width,
+    canvasHeight: height
+  });
 }
 
 function renderAutoOverlay(frameWidth, frameHeight, faces = [], primaryFace = null, best = null) {
-  const canvas = elements.frameCanvas;
-  const ctx = canvas.getContext("2d");
-  if (frameWidth > 0 && frameHeight > 0) {
-    canvas.width = frameWidth;
-    canvas.height = frameHeight;
+  const overlay = prepareOverlayCanvas();
+  if (!overlay) {
+    return;
   }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawFaceBoxes(ctx, faces, primaryFace, best);
+
+  const { ctx, width, height } = overlay;
+  ctx.clearRect(0, 0, width, height);
+  drawFaceBoxes(ctx, faces, primaryFace, best, {
+    sourceWidth: frameWidth,
+    sourceHeight: frameHeight,
+    canvasWidth: width,
+    canvasHeight: height
+  });
 }
 
-function drawFaceBoxes(ctx, faces, primaryFace, best = null) {
+function drawFaceBoxes(ctx, faces, primaryFace, best = null, layoutOptions = null) {
+  const layout = createOverlayLayout(layoutOptions);
   for (const face of faces) {
     const isPrimary = isSameFaceBox(face, primaryFace);
     const person = isPrimary ? best?.person : null;
     const identity = person ? `${formatPerson(person)} [${person.personId}]` : "";
-    drawPremiumFaceBox(ctx, face, {
+    const faceForOverlay = mapFaceBoxToOverlay(face, layout);
+    if (!faceForOverlay) {
+      continue;
+    }
+    drawPremiumFaceBox(ctx, faceForOverlay, {
       isPrimary,
       identity,
       matchState: isPrimary && best?.person ? (best.matched ? "MATCH" : "CANDIDATE") : "",
@@ -813,6 +807,67 @@ function drawRoundedRectPath(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + radius);
   ctx.arcTo(x, y, x + radius, y, radius);
   ctx.closePath();
+}
+
+function prepareOverlayCanvas() {
+  const canvas = elements.frameCanvas;
+  const ctx = canvas.getContext("2d");
+  const rect = elements.viewer?.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect?.width || elements.video.clientWidth || 1));
+  const cssHeight = Math.max(1, Math.round(rect?.height || elements.video.clientHeight || 1));
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const width = Math.max(1, Math.round(cssWidth * dpr));
+  const height = Math.max(1, Math.round(cssHeight * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  return { canvas, ctx, width, height, dpr };
+}
+
+function createOverlayLayout(options = {}) {
+  const sourceWidth = options?.sourceWidth ?? 0;
+  const sourceHeight = options?.sourceHeight ?? 0;
+  const canvasWidth = options?.canvasWidth ?? 0;
+  const canvasHeight = options?.canvasHeight ?? 0;
+  if (!sourceWidth || !sourceHeight || !canvasWidth || !canvasHeight) {
+    return null;
+  }
+
+  const scale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
+  const drawnWidth = sourceWidth * scale;
+  const drawnHeight = sourceHeight * scale;
+
+  return {
+    scale,
+    offsetX: (canvasWidth - drawnWidth) / 2,
+    offsetY: (canvasHeight - drawnHeight) / 2
+  };
+}
+
+function mapFaceBoxToOverlay(face, layout) {
+  if (!face) {
+    return null;
+  }
+  if (!layout) {
+    return face;
+  }
+
+  return {
+    x: layout.offsetX + face.x * layout.scale,
+    y: layout.offsetY + face.y * layout.scale,
+    width: face.width * layout.scale,
+    height: face.height * layout.scale,
+    score: face.score
+  };
+}
+
+function clearFrameOverlay() {
+  const canvas = elements.frameCanvas;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function hasSourceFrame() {
@@ -1000,20 +1055,23 @@ async function registerServiceWorker() {
         }
       });
     });
-
-    const reloadKey = "sw-controller-reload-done";
-    if (!navigator.serviceWorker.controller && !sessionStorage.getItem(reloadKey)) {
-      sessionStorage.setItem(reloadKey, "1");
-      window.location.reload();
-      return;
-    }
-    if (navigator.serviceWorker.controller) {
-      sessionStorage.removeItem(reloadKey);
-    }
   } catch (error) {
     const message = error?.message || "Не удалось зарегистрировать Service Worker.";
     setStatus(`${message} Работа продолжится онлайн.`);
   }
+}
+
+function scheduleOfflineWarmup() {
+  const startWarmup = () => {
+    void warmupOfflineAssets();
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(() => startWarmup(), { timeout: 2500 });
+    return;
+  }
+
+  window.setTimeout(startWarmup, 1500);
 }
 
 async function warmupOfflineAssets() {
@@ -1124,6 +1182,19 @@ function loadImageElement(url) {
   });
 }
 
+function teardownAutoWorker() {
+  for (const [, pending] of appState.worker.pending) {
+    pending.reject(new Error("Воркер автораспознавания перезапущен."));
+  }
+  appState.worker.pending.clear();
+  appState.worker.ready = false;
+  appState.worker.nextRequestId = 1;
+  if (appState.worker.instance) {
+    appState.worker.instance.terminate();
+    appState.worker.instance = null;
+  }
+}
+
 async function ensureAutoWorker() {
   if (!supportsAutoWorker()) {
     return false;
@@ -1143,7 +1214,7 @@ async function ensureAutoWorker() {
     await syncPeopleToWorker();
     return true;
   } catch {
-    appState.worker.ready = false;
+    teardownAutoWorker();
     return false;
   }
 }
@@ -1182,6 +1253,7 @@ function createAutoWorkerInstance() {
     }
     appState.worker.pending.clear();
     appState.worker.ready = false;
+    appState.worker.instance = null;
   };
 
   appState.worker.instance = worker;

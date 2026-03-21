@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v1.0.1";
+const CACHE_VERSION = "v1.0.2";
 const CACHE_PREFIX = "face-id-demo";
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const MODEL_CACHE = `${CACHE_PREFIX}-models-${CACHE_VERSION}`;
@@ -6,38 +6,16 @@ const RUNTIME_CACHE = `${CACHE_PREFIX}-runtime-${CACHE_VERSION}`;
 const CDN_CACHE = `${CACHE_PREFIX}-cdn-${CACHE_VERSION}`;
 
 const APP_SHELL_PATHS = ["./", "./index.html", "./src/style.css", "./src/main.js"];
-const MODEL_PATHS = [
-  "./models/version-RFB-320.onnx",
-  "./models/w600k_mbf.onnx",
-  "./public/models/version-RFB-320.onnx",
-  "./public/models/w600k_mbf.onnx"
-];
 const CDN_PREFIXES = [
   "https://cdn.jsdelivr.net/npm/onnxruntime-web/",
   "https://cdn.jsdelivr.net/npm/onnxruntime-web@"
-];
-const CDN_ASSETS = [
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.all.min.mjs",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.jsep.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.jsep.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.jsep.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-threaded.wasm",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm.wasm"
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const staticCache = await caches.open(STATIC_CACHE);
-      const modelCache = await caches.open(MODEL_CACHE);
-      const cdnCache = await caches.open(CDN_CACHE);
-
       await cacheBestEffort(staticCache, APP_SHELL_PATHS);
-      await cacheBestEffort(modelCache, MODEL_PATHS);
-      await cacheBestEffort(cdnCache, CDN_ASSETS);
 
       await self.skipWaiting();
     })()
